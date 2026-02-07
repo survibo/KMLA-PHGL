@@ -1,6 +1,6 @@
 import { useEffect } from "react";
-import { supabase } from "../lib/supabase";
-import { useMyProfile } from "../hooks/useMyProfile";
+import { supabase } from "../../lib/supabase";
+import { useMyProfile } from "../../hooks/useMyProfile";
 
 export default function StudentCalendar() {
   const { loading, session, profile } = useMyProfile();

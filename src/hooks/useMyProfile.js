@@ -25,7 +25,7 @@ export function useMyProfile() {
       // 2) DB에서 내 profiles 가져오기
       const { data: p, error } = await supabase
         .from("profiles")
-        .select("id, role, approved, name")
+        .select("id, role, approved, name, grade, class_no, student_no")
         .eq("id", s.user.id)
         .single();
 

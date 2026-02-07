@@ -1,11 +1,13 @@
 import { Routes, Route, Navigate } from "react-router-dom";
 
 import Login from "./pages/Login";
-import StudentCalendar from "./pages/StudentCalendar";
-import StudentAbsence from "./pages/StudentAbsence";
+import StudentCalendar from "./pages/student/StudentCalendar";
+import StudentAbsence from "./pages/student/StudentAbsence";
 import TeacherDashboard from "./pages/teacher/TeacherDashboard";
 import NotFound from "./pages/NotFound";
 import AuthCallback from "./pages/AuthCallback";
+import MyProfile from "./pages/MyProfile";
+import MyProfileEdit from "./pages/MyProfileEdit";
 
 import ProtectedRoute from "./components/ProtectedRoute";
 import Pending from "./pages/Pending";
@@ -37,6 +39,23 @@ export default function App() {
           </ProtectedRoute>
         }
       />
+      <Route
+        path="/student/profile"
+        element={
+          <ProtectedRoute role="student">
+            <MyProfile />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/student/profile/edit"
+        element={
+          <ProtectedRoute role="student">
+            <MyProfileEdit />
+          </ProtectedRoute>
+        }
+      />
 
       {/* 교사 (승인 + role=teacher 필요) */}
       <Route
@@ -44,6 +63,23 @@ export default function App() {
         element={
           <ProtectedRoute allowRole="teacher">
             <TeacherDashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/teacher/profile"
+        element={
+          <ProtectedRoute role="teacher">
+            <MyProfile />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/teacher/profile/edit"
+        element={
+          <ProtectedRoute role="teacher">
+            <MyProfileEdit />
           </ProtectedRoute>
         }
       />
