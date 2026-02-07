@@ -29,32 +29,9 @@ export function useMyProfile() {
         .eq("id", s.user.id)
         .single();
 
-      if (error || !p) {
+      if (error) {
         console.error("profile fetch error:", error);
         setProfile(null);
-        setLoading(false);
-        return;
-      }
-
-      // 3) ✅ 최초 로그인 초기값: grade가 비어있으면 현재년도 + 5로 채움
-      if (p.grade == null) {
-        const currentYear = new Date().getFullYear();
-        const defaultGrade = currentYear + 5;
-
-        const { data: updated, error: updateError } = await supabase
-          .from("profiles")
-          .update({ grade: defaultGrade })
-          .eq("id", p.id)
-          .select("id, role, approved, name, grade, class_no, student_no")
-          .single();
-
-        if (updateError) {
-          // 실패해도 앱은 계속 진행 (사용자가 edit에서 수동 입력 가능)
-          console.error("grade auto-set failed:", updateError);
-          setProfile(p); // 원본 유지
-        } else {
-          setProfile(updated); // DB 결과로 동기화
-        }
       } else {
         setProfile(p);
       }
