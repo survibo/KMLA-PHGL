@@ -1,6 +1,7 @@
 민족사관고등학교 PHGL 전용 사이트
 
 Test 하려면 Oauth 해둬야함
+https://www.youtube.com/watch?v=sB6bPOvvlgw
 
 localhost:5173 도 꼭 같이 google oauth에 포함시켜두기
 
