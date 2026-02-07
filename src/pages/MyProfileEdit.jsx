@@ -6,7 +6,6 @@ import { useNavigate } from "react-router-dom";
 function parseRequiredInt(label, raw) {
   const v = String(raw ?? "").trim();
   if (v === "") return { ok: false, msg: `${label}을(를) 입력하세요.` };
-  // 숫자만 허용 (음수/소수 방지)
   if (!/^\d+$/.test(v))
     return { ok: false, msg: `${label}은(는) 숫자만 입력하세요.` };
 
@@ -38,9 +37,8 @@ export default function MyProfileEdit() {
     setStudentNo(profile.student_no ?? "");
   }, [profile]);
 
-  if (loading) return <div style={{ padding: 24 }}>Loading...</div>;
-  if (!profile)
-    return <div style={{ padding: 24 }}>프로필을 불러올 수 없습니다.</div>;
+  if (loading) return <div className="card">Loading...</div>;
+  if (!profile) return <div className="card">프로필을 불러올 수 없습니다.</div>;
 
   const onSubmit = async (e) => {
     e.preventDefault();
@@ -67,13 +65,12 @@ export default function MyProfileEdit() {
       grade: g.value,
       class_no: c.value,
       student_no: s.value,
-      // role/approved 절대 포함 금지
     };
 
     try {
       setSaving(true);
 
-      const { data, error: updateError } = await supabase
+      const { error: updateError } = await supabase
         .from("profiles")
         .update(payload)
         .eq("id", profile.id)
@@ -82,12 +79,9 @@ export default function MyProfileEdit() {
 
       if (updateError) throw updateError;
 
-      // ✅ 저장 성공 → 프로필 보기로 이동
       const to =
         profile.role === "teacher" ? "/teacher/profile" : "/student/profile";
       navigate(to, { replace: true });
-
-      // (원하면 setSaved(true)는 제거해도 됨. 이동하니까 보일 틈이 없음)
     } catch (err) {
       setError(err?.message ?? String(err));
     } finally {
@@ -95,97 +89,71 @@ export default function MyProfileEdit() {
     }
   };
 
-  const inputStyle = {
-    width: "100%",
-    padding: 10,
-    borderRadius: 8,
-    border: "1px solid #ddd",
-  };
-
   return (
-    <div style={{ padding: 24, maxWidth: 420 }}>
-      <h2 style={{ marginTop: 0 }}>내 정보 수정</h2>
+    <div className="card">
+      <h2>내 정보 수정</h2>
 
-      <form
-        onSubmit={onSubmit}
-        style={{ border: "1px solid #ddd", borderRadius: 10, padding: 14 }}
-      >
-        <div style={{ marginBottom: 10 }}>
-          <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>
-            이름
-          </div>
+      <form onSubmit={onSubmit} className="container profile-form">
+        <div className="field">
+          <div className="label">이름</div>
           <input
+            className="input"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            style={inputStyle}
+            placeholder="이름"
           />
         </div>
 
         <div
-          style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}
+          style={{
+            width: "100%",
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr 1fr",
+            gap: "14px",
+          }}
         >
-          <div>
-            <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>
-              기수
-            </div>
+          <div className="field">
+            <div className="label">기수</div>
             <input
+              className="input"
               value={grade}
               onChange={(e) => setGrade(e.target.value)}
               inputMode="numeric"
-              style={inputStyle}
               placeholder="숫자"
             />
           </div>
 
-          <div>
-            <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>
-              반
-            </div>
+          <div className="field">
+            <div className="label">반</div>
             <input
+              className="input"
               value={classNo}
               onChange={(e) => setClassNo(e.target.value)}
               inputMode="numeric"
-              style={inputStyle}
               placeholder="숫자"
             />
           </div>
 
-          <div style={{ gridColumn: "1 / -1" }}>
-            <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>
-              학번
-            </div>
+          <div className="field">
+            <div className="label">학번</div>
             <input
+              className="input"
               value={studentNo}
               onChange={(e) => setStudentNo(e.target.value)}
               inputMode="numeric"
-              style={inputStyle}
               placeholder="숫자"
             />
           </div>
         </div>
 
-        <div style={{ marginTop: 8, fontSize: 12, opacity: 0.7 }}>
+        <div className="hint">
           * 기수/반/학번은 저장 전에 반드시 숫자로 입력해야 합니다.
         </div>
 
-        {error && (
-          <div style={{ marginTop: 10, color: "crimson" }}>에러: {error}</div>
-        )}
-        {saved && (
-          <div style={{ marginTop: 10, color: "green" }}>저장 완료</div>
-        )}
+        {error && <div className="alert alert--error">에러: {error}</div>}
+        {saved && <div className="alert">저장 완료</div>}
 
-        <button
-          type="submit"
-          disabled={saving}
-          style={{
-            marginTop: 12,
-            width: "100%",
-            padding: 10,
-            borderRadius: 8,
-            border: "1px solid #ddd",
-          }}
-        >
+        <button type="submit" disabled={saving} className="button">
           {saving ? "저장 중..." : "저장"}
         </button>
       </form>
