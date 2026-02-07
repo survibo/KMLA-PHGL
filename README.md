@@ -11,4 +11,5 @@ localhost:5173 도 꼭 같이 google oauth에 포함시켜두기
    <img width="2214" height="496" alt="image" src="https://github.com/user-attachments/assets/bea24900-f95f-4bfa-9dc4-e3d589a75888" />
 
 
-4)  실행 - test
+3) SCHEME.md 복사해서 sql editor에 넣기
+4) 알아서 잘
