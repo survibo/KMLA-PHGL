@@ -1,4 +1,7 @@
+import { useNavigate } from "react-router-dom";
 import { useMyProfile } from "../hooks/useMyProfile";
+import StudentGoCalendar from "../components/StudentGoCalendar";
+
 
 function row(label, value) {
   return (
@@ -17,10 +20,17 @@ function row(label, value) {
 }
 
 export default function MyProfile() {
+  const navigate = useNavigate();
   const { loading, profile } = useMyProfile();
 
   if (loading) return <div style={{ padding: 24 }}>Loading...</div>;
-  if (!profile) return <div style={{ padding: 24 }}>프로필을 불러올 수 없습니다.</div>;
+  if (!profile)
+    return <div style={{ padding: 24 }}>프로필을 불러올 수 없습니다.</div>;
+
+  const editPath =
+    profile.role === "teacher"
+      ? "/teacher/profile/edit"
+      : "/student/profile/edit";
 
   return (
     <div style={{ padding: 24, maxWidth: 360 }}>
@@ -32,6 +42,24 @@ export default function MyProfile() {
         {row("반", profile.class_no)}
         {row("학번", profile.student_no)}
       </div>
+
+      <button
+        onClick={() => navigate(editPath)}
+        style={{
+          marginTop: 16,
+          width: "100%",
+          padding: "10px 0",
+          borderRadius: 8,
+          border: "1px solid #ccc",
+          background: "#fff",
+          cursor: "pointer",
+          fontWeight: 600,
+        }}
+      >
+        정보 수정
+      </button>
+
+      <StudentGoCalendar />
     </div>
   );
 }
