@@ -22,7 +22,7 @@
 - React + Vite
 - react-router-dom
 - Supabase (Google OAuth)
-- UI 라이브러리 없음 (순수 JSX + inline style)
+- UI 라이브러리 없음 (순수 JSX + index.css)
 
 ==================================================
 [DB 구조 (확정)]

@@ -1,0 +1,89 @@
+.card {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;     /* 네 기준 유지 */
+  align-items: stretch;        /* ✅ 내용은 카드 폭을 쓰게(답답함 해소) */
+
+  gap: 22px;                   /* ✅ 요소 간 간격 증가 */
+
+  padding: 28px;               /* ✅ 카드 내부 여백 증가 */
+  border-radius: 14px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-1);
+
+  max-width: 420px;            /* ✅ 조금 넓게 */
+  width: calc(100% - 32px);    /* ✅ 모바일에서 양옆 여백 확보 */
+  margin: 28px auto;
+
+  color: var(--text-1);
+}
+
+.card > h2 {
+  margin: 0;
+  text-align: center;          /* 제목만 중앙 */
+  font-size: 20px;
+  font-weight: 800;
+}
+
+/* form은 카드 폭 100% 사용 */
+.profile-form {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;                   /* ✅ 폼 섹션 간 간격 */
+}
+
+/* 필드 간격 */
+.field {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;                   /* ✅ 라벨-인풋 간 간격 */
+}
+
+.label {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-2);
+}
+
+
+@media (max-width: 420px) {
+  .grid-3 {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* input: 더 “숨 쉴” 공간 */
+.input {
+  width: 100%;
+  padding: 12px 14px;          /* ✅ 좀 더 큼 */
+  border-radius: 12px;         /* ✅ 둥글게 조금 더 */
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-2);
+  color: var(--text-1);
+  font-size: 16px;
+}
+
+/* 힌트 줄간격/여백 */
+.hint {
+  width: 100%;
+  font-size: 13px;
+  line-height: 1.6;            /* ✅ 줄간격 증가 */
+  color: var(--text-muted);
+}
+
+/* 버튼도 숨통 */
+.button {
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-1);
+  color: var(--text-1);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.button:hover { background: var(--bg-hover); }
+.button:active { background: var(--bg-hover-strong); }
+.button:disabled { opacity: 0.6; cursor: not-allowed; }
