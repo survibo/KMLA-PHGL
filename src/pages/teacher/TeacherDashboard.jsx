@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { listPendingStudents, approveStudent } from "../../features/teacher/approvals.api";
+import { listPendingStudents, approveStudent } from "../../features/approvals.api";
 
 export default function TeacherDashboard() {
   const [pending, setPending] = useState([]);

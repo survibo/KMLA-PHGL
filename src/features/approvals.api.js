@@ -1,4 +1,4 @@
-import { supabase } from "../../lib/supabase";
+import { supabase } from "../lib/supabase";
 
 // 승인 대기 학생 목록
 export async function listPendingStudents() {
