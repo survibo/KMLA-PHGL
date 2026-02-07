@@ -5,6 +5,7 @@ import StudentCalendar from "./pages/StudentCalendar";
 import StudentAbsence from "./pages/StudentAbsence";
 import TeacherDashboard from "./pages/TeacherDashboard";
 import NotFound from "./pages/NotFound";
+import AuthCallback from "./pages/AuthCallback";
 
 export default function App() {
   return (
@@ -17,6 +18,7 @@ export default function App() {
       <Route path="/student/absence" element={<StudentAbsence />} />
 
       <Route path="/teacher" element={<TeacherDashboard />} />
+      <Route path="/auth/callback" element={<AuthCallback />} />
 
       <Route path="*" element={<NotFound />} />
     </Routes>
