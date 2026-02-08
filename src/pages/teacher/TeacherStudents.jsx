@@ -10,19 +10,18 @@ const SORTS = {
 export default function TeacherStudents() {
   const [loading, setLoading] = useState(true);
   const [students, setStudents] = useState([]);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState("");
 
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState(SORTS.STUDENT_NO);
   const [asc, setAsc] = useState(true);
 
-  // row별 업데이트 중 표시용
   const [updatingId, setUpdatingId] = useState(null);
 
   useEffect(() => {
     const load = async () => {
       setLoading(true);
-      setError(null);
+      setError("");
 
       const { data, error } = await supabase
         .from("profiles")
@@ -45,13 +44,11 @@ export default function TeacherStudents() {
   const filtered = useMemo(() => {
     let list = students;
 
-    // 1) 이름 검색
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       list = list.filter((s) => (s.name ?? "").toLowerCase().includes(q));
     }
 
-    // 2) 정렬
     list = [...list].sort((a, b) => {
       const va = a[sortKey];
       const vb = b[sortKey];
@@ -71,7 +68,6 @@ export default function TeacherStudents() {
   }, [students, search, sortKey, asc]);
 
   const toggleApproved = async (student) => {
-    // ✅ 승인 취소할 때만 경고
     if (student.approved) {
       const ok = window.confirm(
         `${student.name ?? "학생"}의 승인을 취소할까요?\n취소하면 학생은 /pending 상태로 돌아갑니다.`
@@ -93,10 +89,7 @@ export default function TeacherStudents() {
 
       if (error) throw error;
 
-      // 로컬 상태 업데이트
-      setStudents((prev) =>
-        prev.map((s) => (s.id === student.id ? data : s))
-      );
+      setStudents((prev) => prev.map((s) => (s.id === student.id ? data : s)));
     } catch (err) {
       window.alert(`승인 상태 변경 실패: ${err?.message ?? String(err)}`);
     } finally {
@@ -104,45 +97,89 @@ export default function TeacherStudents() {
     }
   };
 
-  if (loading) return <div className="p-6 text-gray-500">불러오는 중…</div>;
-  if (error) return <div className="p-6 text-red-600">오류: {error}</div>;
+  if (loading) {
+    return (
+      <div className="l-page">
+        <div className="u-panel" style={{ padding: 14 }}>
+          불러오는 중…
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="l-page">
+        <div className="u-alert u-alert--error">오류: {error}</div>
+      </div>
+    );
+  }
 
   return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold mb-6">학생 관리</h1>
+    <div className="l-page">
+      {/* Header */}
+      <div className="u-panel" style={{ padding: 14 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontSize: 18, fontWeight: 900 }}>학생 관리</div>
+            <div style={{ marginTop: 4, fontSize: 13, color: "var(--text-muted)" }}>
+              학생 승인 상태를 조회/변경합니다.
+            </div>
+          </div>
+
+          <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
+            총 <b style={{ color: "var(--text-1)" }}>{filtered.length}</b>명 / 전체{" "}
+            <b style={{ color: "var(--text-1)" }}>{students.length}</b>명
+          </div>
+        </div>
+      </div>
 
       {/* Controls */}
-      <div className="flex items-center gap-4 mb-4">
-        <input
-          className="border rounded px-3 py-2 w-64"
-          placeholder="이름 검색"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
+      <div className="u-panel" style={{ padding: 14 }}>
+        <div className="l-section">
+          <div className="f-field">
+            <div className="f-label">이름 검색</div>
+            <input
+              className="c-ctl c-input"
+              placeholder="이름 검색"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
 
-        <select
-          className="border rounded px-3 py-2"
-          value={sortKey}
-          onChange={(e) => setSortKey(e.target.value)}
-        >
-          <option value={SORTS.STUDENT_NO}>학번</option>
-          <option value={SORTS.CLASS_NO}>반</option>
-          <option value={SORTS.APPROVED}>승인 여부</option>
-        </select>
+          <div className="r-split">
+            <div className="f-field">
+              <div className="f-label">정렬 기준</div>
+              <select
+                className="c-ctl c-input"
+                value={sortKey}
+                onChange={(e) => setSortKey(e.target.value)}
+              >
+                <option value={SORTS.STUDENT_NO}>학번</option>
+                <option value={SORTS.CLASS_NO}>반</option>
+                <option value={SORTS.APPROVED}>승인 여부</option>
+              </select>
+            </div>
 
-        <button
-          className="border rounded px-3 py-2"
-          onClick={() => setAsc((v) => !v)}
-        >
-          {asc ? "오름차순 ↑" : "내림차순 ↓"}
-        </button>
+            <div className="f-field">
+              <div className="f-label">정렬 방향</div>
+              <button type="button" className="c-ctl c-btn" onClick={() => setAsc((v) => !v)}>
+                {asc ? "오름차순 ↑" : "내림차순 ↓"}
+              </button>
+            </div>
+          </div>
+
+          <div className="f-hint">
+            * 승인 취소는 확인창이 뜹니다. 승인 처리(대기 → 승인)는 즉시 반영됩니다.
+          </div>
+        </div>
       </div>
 
       {/* Table */}
-      <div className="overflow-x-auto border rounded-lg">
-        <table className="min-w-full border-collapse">
-          <thead className="bg-gray-100">
-            <tr>
+      <div className="u-panel" style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 720 }}>
+          <thead>
+            <tr style={{ background: "var(--bg-2)" }}>
               <Th>이름</Th>
               <Th>기수</Th>
               <Th>반</Th>
@@ -155,36 +192,49 @@ export default function TeacherStudents() {
             {filtered.map((s) => {
               const busy = updatingId === s.id;
 
+              const statusText = s.approved ? "승인됨" : "대기";
+              const statusColor = s.approved ? "var(--text-1)" : "var(--text-muted)";
+              const action示 = s.approved ? "취소" : "승인";
+
               return (
-                <tr key={s.id} className="border-t hover:bg-gray-50">
-                  <Td className="font-medium">{s.name}</Td>
+                <tr
+                  key={s.id}
+                  style={{
+                    borderTop: `1px solid var(--border-subtle)`,
+                    background: "var(--bg-1)",
+                  }}
+                >
+                  <Td strong>{s.name ?? "-"}</Td>
                   <Td>{s.grade ?? "-"}</Td>
                   <Td>{s.class_no ?? "-"}</Td>
                   <Td>{s.student_no ?? "-"}</Td>
 
                   <Td>
-                    <div className="flex items-center gap-3">
-                      {s.approved ? (
-                        <span className="text-green-600 font-semibold">
-                          승인됨
-                        </span>
-                      ) : (
-                        <span className="text-gray-400">대기</span>
-                      )}
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 10,
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <span style={{ fontSize: 13, fontWeight: 800, color: statusColor }}>
+                        {statusText}
+                      </span>
 
                       <button
-                        className={`px-3 py-1.5 rounded border text-sm font-semibold ${
-                          s.approved
-                            ? "border-red-300 text-red-600 hover:bg-red-50"
-                            : "border-green-300 text-green-700 hover:bg-green-50"
-                        } ${busy ? "opacity-60 cursor-not-allowed" : ""}`}
+                        type="button"
+                        className={`c-ctl c-btn ${s.approved ? "c-btn--danger" : ""}`}
                         disabled={busy}
                         onClick={() => toggleApproved(s)}
-                        title={
-                          s.approved ? "승인 취소" : "승인 처리"
-                        }
+                        title={s.approved ? "승인 취소" : "승인 처리"}
+                        style={{
+                          fontWeight: 900,
+                          opacity: busy ? 0.6 : 1,
+                        }}
                       >
-                        {busy ? "처리중..." : s.approved ? "취소" : "승인"}
+                        {busy ? "처리중..." : action示}
                       </button>
                     </div>
                   </Td>
@@ -192,19 +242,15 @@ export default function TeacherStudents() {
               );
             })}
 
-            {filtered.length === 0 && (
+            {filtered.length === 0 ? (
               <tr>
-                <td colSpan={5} className="p-6 text-center text-gray-400">
+                <td colSpan={5} style={{ padding: 18, textAlign: "center", color: "var(--text-muted)" }}>
                   검색 결과가 없습니다.
                 </td>
               </tr>
-            )}
+            ) : null}
           </tbody>
         </table>
-      </div>
-
-      <div className="mt-4 text-sm text-gray-500">
-        총 {filtered.length}명 / 전체 {students.length}명
       </div>
     </div>
   );
@@ -212,12 +258,33 @@ export default function TeacherStudents() {
 
 function Th({ children }) {
   return (
-    <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 border-b">
+    <th
+      style={{
+        textAlign: "left",
+        fontSize: 13,
+        fontWeight: 900,
+        color: "var(--text-2)",
+        padding: "12px 14px",
+        borderBottom: "1px solid var(--border-subtle)",
+        whiteSpace: "nowrap",
+      }}
+    >
       {children}
     </th>
   );
 }
 
-function Td({ children, className = "" }) {
-  return <td className={`px-4 py-3 text-sm ${className}`}>{children}</td>;
+function Td({ children, strong = false }) {
+  return (
+    <td
+      style={{
+        padding: "12px 14px",
+        fontSize: 13,
+        fontWeight: strong ? 900 : 700,
+        whiteSpace: "nowrap",
+      }}
+    >
+      {children}
+    </td>
+  );
 }

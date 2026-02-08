@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { supabase } from "../../lib/supabase"; // 네 경로로 맞춰
-import { useMyProfile} from "../../hooks/useMyProfile";
+import { supabase } from "../../lib/supabase";
+import { useMyProfile } from "../../hooks/useMyProfile";
 import {
   addDays,
   formatKoreanMD,
@@ -16,6 +16,7 @@ function minutesToHoursText(min) {
   const h = min / 60;
   return Number.isInteger(h) ? `${h}시간` : `${h.toFixed(1)}시간`;
 }
+
 function hoursToMinutes(hoursStr) {
   const n = Number(hoursStr);
   if (!Number.isFinite(n) || n <= 0) return null;
@@ -24,18 +25,19 @@ function hoursToMinutes(hoursStr) {
 
 function Modal({ open, title, onClose, children }) {
   if (!open) return null;
+
   return (
-    <div className="modal-overlay" role="dialog" aria-modal="true">
-      <div className="modal">
-        <div className="modal__header">
-          <div className="modal__title">{title}</div>
-          <button className="button" onClick={onClose}>
+    <div className="m-overlay" role="dialog" aria-modal="true">
+      <button className="m-backdrop" onClick={onClose} aria-label="close" />
+      <div className="m-box">
+        <div className="m-header">
+          <div className="m-title">{title}</div>
+          <button className="c-ctl c-btn" onClick={onClose} type="button">
             닫기
           </button>
         </div>
-        <div className="modal__body">{children}</div>
+        <div className="m-body">{children}</div>
       </div>
-      <button className="modal-overlay__backdrop" onClick={onClose} aria-label="close" />
     </div>
   );
 }
@@ -54,10 +56,12 @@ export default function StudentCalendar() {
   const [selectedIdx, setSelectedIdx] = useState(() => {
     const today = new Date();
     const wMon = startOfWeekMonday(today);
-    return Math.max(0, Math.min(6, Math.floor((today - wMon) / (1000 * 60 * 60 * 24))));
+    return Math.max(
+      0,
+      Math.min(6, Math.floor((today - wMon) / (1000 * 60 * 60 * 24)))
+    );
   });
 
-  // week 바뀌면 선택도 월요일로 리셋(원하면 0 고정)
   useEffect(() => {
     setSelectedIdx(0);
   }, [toISODate(monday)]);
@@ -189,7 +193,7 @@ export default function StudentCalendar() {
   }
 
   async function deleteEvent(id) {
-    const ok = window.confirm("이 항목을 삭제할까?");
+    const ok = window.confirm("이 항목을 삭제하겠습니까?");
     if (!ok) return;
 
     setError("");
@@ -201,52 +205,91 @@ export default function StudentCalendar() {
     await fetchWeek();
   }
 
-  if (loading) return <div className="container">Loading...</div>;
+  if (loading) {
+    return (
+      <div className="l-page">
+        <div className="u-panel" style={{ padding: 14 }}>
+          Loading...
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="container calendar-page">
-      <div className="calendar-top">
-        <div className="calendar-top__left">
-          <h2 className="calendar-title">주간 학습</h2>
-          <div className="calendar-subtitle">{formatWeekRange(monday)}</div>
-        </div>
+    <div className="l-page">
+      {/* Header */}
+      <div className="u-panel" style={{ padding: 14 }}>
+        <div className="l-section" style={{ gap: 6 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+            <div>
+              <div style={{ fontSize: 18, fontWeight: 900 }}>주간 학습</div>
+              <div style={{ fontSize: 13, color: "var(--text-muted)" }}>{formatWeekRange(monday)}</div>
+            </div>
 
-        <div className="calendar-top__right">
-          <button className="button" onClick={() => setWeekBase(addDays(monday, -7))}>
-            이전 주
-          </button>
-          <button className="button" onClick={() => setWeekBase(startOfWeekMonday(new Date()))}>
-            이번 주
-          </button>
-          <button className="button" onClick={() => setWeekBase(addDays(monday, 7))}>
-            다음 주
-          </button>
-        </div>
-      </div>
-
-      <div className="card calendar-summary">
-        <div className="calendar-summary__row">
-          <div className="calendar-summary__item">
-            <div className="calendar-summary__label">기초 역량 강화</div>
-            <div className="calendar-summary__value">
-              {minutesToHoursText(totals["기초 역량 강화"])}
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button
+                className="c-ctl c-btn"
+                type="button"
+                onClick={() => setWeekBase(addDays(monday, -7))}
+              >
+                이전 주
+              </button>
+              <button
+                className="c-ctl c-btn"
+                type="button"
+                onClick={() => setWeekBase(startOfWeekMonday(new Date()))}
+              >
+                이번 주
+              </button>
+              <button
+                className="c-ctl c-btn"
+                type="button"
+                onClick={() => setWeekBase(addDays(monday, 7))}
+              >
+                다음 주
+              </button>
             </div>
           </div>
-          <div className="calendar-summary__item">
-            <div className="calendar-summary__label">진로 탐색</div>
-            <div className="calendar-summary__value">{minutesToHoursText(totals["진로 탐색"])}</div>
+
+          {/* Summary */}
+          <div className="r-split" style={{ marginTop: 10 }}>
+            <div className="u-panel" style={{ padding: 12, background: "var(--bg-2)" }}>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 800 }}>
+                기초 역량 강화
+              </div>
+              <div style={{ fontSize: 18, fontWeight: 900, marginTop: 4 }}>
+                {minutesToHoursText(totals["기초 역량 강화"])}
+              </div>
+            </div>
+
+            <div className="u-panel" style={{ padding: 12, background: "var(--bg-2)" }}>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 800 }}>
+                진로 탐색
+              </div>
+              <div style={{ fontSize: 18, fontWeight: 900, marginTop: 4 }}>
+                {minutesToHoursText(totals["진로 탐색"])}
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
-      {error ? (
-        <div className="alert alert--error" style={{ marginTop: 10 }}>
-          {error}
-        </div>
-      ) : null}
+      {/* Error */}
+      {error ? <div className="u-alert u-alert--error">{error}</div> : null}
 
-      {/* 월~일 선택 탭 */}
-      <div className="day-tabs" role="tablist" aria-label="week days">
+      {/* Day tabs (horizontal scroll, touch-friendly) */}
+      <div
+        className="u-panel"
+        style={{
+          padding: 10,
+          background: "var(--bg-1)",
+          overflowX: "auto",
+          display: "flex",
+          gap: 8,
+        }}
+        role="tablist"
+        aria-label="week days"
+      >
         {weekDays.map((d, idx) => {
           const iso = toISODate(d);
           const count = (eventsByDate.get(iso) ?? []).length;
@@ -255,55 +298,91 @@ export default function StudentCalendar() {
           return (
             <button
               key={iso}
-              className={`day-tab ${active ? "day-tab--active" : ""}`}
-              onClick={() => setSelectedIdx(idx)}
+              type="button"
               role="tab"
               aria-selected={active}
+              onClick={() => setSelectedIdx(idx)}
+              className="c-ctl c-btn"
+              style={{
+                minWidth: 92,
+                background: active ? "var(--bg-2)" : "var(--bg-1)",
+                borderColor: active ? "var(--border-focus)" : "var(--border-subtle)",
+              }}
             >
-              <div className="day-tab__top">
-                <span className="day-tab__dow">{DOW[idx]}</span>
-                <span className="day-tab__md">{formatKoreanMD(d)}</span>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, width: "100%" }}>
+                <div style={{ fontWeight: 900 }}>{DOW[idx]}</div>
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{formatKoreanMD(d)}</div>
               </div>
-              <div className="day-tab__count">{count}건</div>
+              <div style={{ marginTop: 6, fontSize: 12, color: "var(--text-muted)" }}>{count}건</div>
             </button>
           );
         })}
       </div>
 
-      {/* 선택된 하루만 표시 */}
-      <div className="card day-panel">
-        <div className="day-panel__header">
-          <div className="day-panel__title">
+      {/* Selected day panel */}
+      <div className="u-panel" style={{ padding: 14 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
+          <div style={{ fontWeight: 900 }}>
             {DOW[selectedIdx]}요일 · {formatKoreanMD(selectedDate)}
           </div>
-          <button className="button" onClick={openAdd}>
+          <button className="c-ctl c-btn" type="button" onClick={openAdd}>
             일정 추가
           </button>
         </div>
 
-        <div className="day-panel__body">
+        <div style={{ marginTop: 12 }}>
           {fetching ? (
-            <div className="day-panel__empty">불러오는 중...</div>
+            <div style={{ color: "var(--text-muted)", fontSize: 13 }}>불러오는 중...</div>
           ) : selectedList.length === 0 ? (
-            <div className="day-panel__empty">등록된 학습 없음</div>
+            <div style={{ color: "var(--text-muted)", fontSize: 13 }}>등록된 학습 없음</div>
           ) : (
-            <div className="day-panel__list">
+            <div className="l-section">
               {selectedList.map((ev) => (
-                <div key={ev.id} className="event-row">
-                  <div className="event-row__main">
-                    <div className="event-row__top">
-                      <span className={`badge ${ev.category === "진로 탐색" ? "badge--alt" : ""}`}>
-                        {ev.category}
-                      </span>
-                      <span className="event-row__time">{minutesToHoursText(ev.duration_min)}</span>
-                    </div>
-                    <div className="event-row__title">{ev.title}</div>
-                    {ev.description ? <div className="event-row__desc">{ev.description}</div> : null}
-                  </div>
+                <div
+                  key={ev.id}
+                  className="u-panel"
+                  style={{
+                    background: "var(--bg-2)",
+                    padding: 12,
+                    borderRadius: "var(--radius-2)",
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                    <div>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                        <span
+                          className="u-panel"
+                          style={{
+                            borderRadius: 999,
+                            padding: "2px 8px",
+                            fontSize: 12,
+                            background: "var(--bg-1)",
+                          }}
+                        >
+                          {ev.category}
+                        </span>
+                        <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                          {minutesToHoursText(ev.duration_min)}
+                        </span>
+                      </div>
 
-                  <button className="button button--danger" onClick={() => deleteEvent(ev.id)}>
-                    삭제
-                  </button>
+                      <div style={{ marginTop: 6, fontWeight: 900 }}>{ev.title}</div>
+                      {ev.description ? (
+                        <div style={{ marginTop: 6, color: "var(--text-muted)", fontSize: 13, whiteSpace: "pre-wrap" }}>
+                          {ev.description}
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <button
+                      className="c-ctl c-btn c-btn--danger"
+                      type="button"
+                      onClick={() => deleteEvent(ev.id)}
+                      style={{ height: "fit-content" }}
+                    >
+                      삭제
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -311,69 +390,76 @@ export default function StudentCalendar() {
         </div>
       </div>
 
-      {/* ADD MODAL */}
+      {/* Add modal */}
       <Modal
         open={addOpen}
         title={`${DOW[selectedIdx]}요일 (${formatKoreanMD(selectedDate)}) 일정 추가`}
         onClose={() => setAddOpen(false)}
       >
-        <div className="field">
-          <div className="label">카테고리</div>
-          <select
-            className="input"
-            value={draft.category}
-            onChange={(e) => setDraft((p) => ({ ...p, category: e.target.value }))}
-          >
-            {CATEGORIES.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
-        </div>
+        <div className="l-section">
+          <div className="f-field">
+            <div className="f-label">카테고리</div>
+            <select
+              className="c-ctl c-input"
+              value={draft.category}
+              onChange={(e) => setDraft((p) => ({ ...p, category: e.target.value }))}
+            >
+              {CATEGORIES.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </div>
 
-        <div className="field" style={{ marginTop: 10 }}>
-          <div className="label">내용</div>
-          <input
-            className="input"
-            value={draft.title}
-            onChange={(e) => setDraft((p) => ({ ...p, title: e.target.value }))}
-            placeholder="학습 내용"
-            autoFocus
-          />
-          <div className="hint">텍스트 자유 입력</div>
-        </div>
+          <div className="f-field">
+            <div className="f-label">내용</div>
+            <input
+              className="c-ctl c-input"
+              value={draft.title}
+              onChange={(e) => setDraft((p) => ({ ...p, title: e.target.value }))}
+              placeholder="학습 내용"
+              autoFocus
+            />
+            <div className="f-hint">텍스트 자유 입력</div>
+          </div>
 
-        <div className="field" style={{ marginTop: 10 }}>
-          <div className="label">시간(시간)</div>
-          <input
-            className="input"
-            value={draft.hours}
-            onChange={(e) => setDraft((p) => ({ ...p, hours: e.target.value }))}
-            placeholder="1"
-            inputMode="decimal"
-          />
-          <div className="hint">예: 1, 1.5</div>
-        </div>
+          <div className="f-field">
+            <div className="f-label">시간(시간)</div>
+            <input
+              className="c-ctl c-input"
+              value={draft.hours}
+              onChange={(e) => setDraft((p) => ({ ...p, hours: e.target.value }))}
+              placeholder="1"
+              inputMode="decimal"
+            />
+            <div className="f-hint">예: 1, 1.5</div>
+          </div>
 
-        <div className="field" style={{ marginTop: 10 }}>
-          <div className="label">설명(선택)</div>
-          <textarea
-            className="input"
-            value={draft.description}
-            onChange={(e) => setDraft((p) => ({ ...p, description: e.target.value }))}
-            placeholder="자유 메모"
-            rows={3}
-          />
-        </div>
+          <div className="f-field">
+            <div className="f-label">설명(선택)</div>
+            <textarea
+              className="c-ctl c-textarea"
+              value={draft.description}
+              onChange={(e) => setDraft((p) => ({ ...p, description: e.target.value }))}
+              placeholder="자유 메모"
+              rows={3}
+            />
+          </div>
 
-        <div className="modal__footer">
-          <button className="button" onClick={() => setAddOpen(false)} disabled={saving}>
-            취소
-          </button>
-          <button className="button" onClick={addEvent} disabled={saving}>
-            {saving ? "저장중..." : "등록"}
-          </button>
+          <div className="m-footer" style={{ padding: 0 }}>
+            <button
+              className="c-ctl c-btn"
+              type="button"
+              onClick={() => setAddOpen(false)}
+              disabled={saving}
+            >
+              취소
+            </button>
+            <button className="c-ctl c-btn" type="button" onClick={addEvent} disabled={saving}>
+              {saving ? "저장중..." : "등록"}
+            </button>
+          </div>
         </div>
       </Modal>
     </div>

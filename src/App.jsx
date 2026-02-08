@@ -3,15 +3,16 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import Login from "./pages/Login";
 import StudentCalendar from "./pages/student/StudentCalendar";
 import StudentAbsence from "./pages/student/StudentAbsence";
-import TeacherDashboard from "./pages/teacher/TeacherDashboard";
-import NotFound from "./pages/NotFound";
+import NotFound from "./pages/error/NotFound";
 import AuthCallback from "./pages/AuthCallback";
 import MyProfile from "./pages/MyProfile";
 import MyProfileEdit from "./pages/MyProfileEdit";
 import TeacherStudents from "./pages/teacher/TeacherStudents";
 
 import ProtectedRoute from "./components/ProtectedRoute";
-import Pending from "./pages/Pending";
+import Pending from "./pages/student/Pending";
+import StudentLayout from "./components/StudentLayout";
+import TeacherLayout from "./components/TeacherLayout";
 
 export default function App() {
   return (
@@ -23,12 +24,14 @@ export default function App() {
       <Route path="/auth/callback" element={<AuthCallback />} />
       <Route path="/pending" element={<Pending />} />
 
-      {/* 학생 (승인 + role=student 필요) */}
+      {/* 학생 */}
       <Route
         path="/student/calendar"
         element={
           <ProtectedRoute allowRole="student">
-            <StudentCalendar />
+            <StudentLayout>
+              <StudentCalendar />
+            </StudentLayout>
           </ProtectedRoute>
         }
       />
@@ -36,51 +39,61 @@ export default function App() {
         path="/student/absence"
         element={
           <ProtectedRoute allowRole="student">
-            <StudentAbsence />
+            <StudentLayout>
+              <StudentAbsence />
+            </StudentLayout>
           </ProtectedRoute>
         }
       />
       <Route
         path="/student/profile"
         element={
-          <ProtectedRoute role="student">
-            <MyProfile />
+          <ProtectedRoute allowRole="student">
+            <StudentLayout>
+              <MyProfile />
+            </StudentLayout>
           </ProtectedRoute>
         }
       />
-
       <Route
         path="/student/profile/edit"
         element={
-          <ProtectedRoute role="student">
-            <MyProfileEdit />
+          <ProtectedRoute allowRole="student">
+            <StudentLayout>
+              <MyProfileEdit />
+            </StudentLayout>
           </ProtectedRoute>
         }
       />
 
-      {/* 교사 (승인 + role=teacher 필요) */}
+      {/* 교사 */}
       <Route
         path="/teacher"
         element={
           <ProtectedRoute allowRole="teacher">
-            <TeacherDashboard />
+            <TeacherLayout>
+              <TeacherStudents />
+            </TeacherLayout>
           </ProtectedRoute>
         }
       />
       <Route
         path="/teacher/profile"
         element={
-          <ProtectedRoute role="teacher">
-            <MyProfile />
+          <ProtectedRoute allowRole="teacher">
+            <TeacherLayout>
+              <MyProfile />
+            </TeacherLayout>
           </ProtectedRoute>
         }
       />
-
       <Route
         path="/teacher/profile/edit"
         element={
-          <ProtectedRoute role="teacher">
-            <MyProfileEdit />
+          <ProtectedRoute allowRole="teacher">
+            <TeacherLayout>
+              <MyProfileEdit />
+            </TeacherLayout>
           </ProtectedRoute>
         }
       />
@@ -88,7 +101,9 @@ export default function App() {
         path="/teacher/students"
         element={
           <ProtectedRoute allowRole="teacher">
-            <TeacherStudents />
+            <TeacherLayout>
+              <TeacherStudents />
+            </TeacherLayout>
           </ProtectedRoute>
         }
       />

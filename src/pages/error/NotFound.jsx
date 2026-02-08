@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { useMyProfile } from "../hooks/useMyProfile";
+import { useMyProfile } from "../../hooks/useMyProfile";
 
 export default function NotFound() {
   const { session, profile, loading } = useMyProfile();
