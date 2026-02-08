@@ -14,10 +14,45 @@ export default function NotFound() {
   }
 
   return (
-    <div style={{ padding: 24 }}>
-      <h1>404</h1>
-      <p>존재하지 않는 페이지입니다.</p>
-      <Link to={homePath}>메인으로</Link>
+    <div className="l-page" style={{ alignItems: "center", justifyContent: "center", minHeight: "60vh" }}>
+      <div
+        className="u-panel"
+        style={{
+          padding: 24,
+          textAlign: "center",
+          maxWidth: 420,
+          width: "100%",
+        }}
+      >
+        <div style={{ fontSize: 32, fontWeight: 900 }}>404</div>
+
+        <div
+          style={{
+            marginTop: 8,
+            fontSize: 14,
+            color: "var(--text-muted)",
+            fontWeight: 700,
+          }}
+        >
+          존재하지 않는 페이지입니다.
+        </div>
+
+        <div style={{ marginTop: 18 }}>
+          <Link
+            to={homePath}
+            className="c-ctl c-btn"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontWeight: 900,
+              padding: "10px 16px",
+            }}
+          >
+            메인으로 이동
+          </Link>
+        </div>
+      </div>
     </div>
   );
 }

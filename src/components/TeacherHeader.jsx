@@ -81,6 +81,8 @@ export default function TeacherHeader() {
         <Tab to="/teacher/absences" label="결석" />
         <Tab to="/teacher/calendar/first" label="캘린더" />
         <Tab to="/teacher/profile" label="내 정보" />
+                <Tab to="/teacher/teachers" label="선생님 목록" />
+
       </div>
     </div>
   );
