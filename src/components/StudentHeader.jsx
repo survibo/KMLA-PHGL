@@ -1,6 +1,7 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { useMyProfile } from "../hooks/useMyProfile";
+import { useTheme } from "../lib/useTheme";
 
 function Tab({ to, label }) {
   return (
@@ -25,6 +26,7 @@ function Tab({ to, label }) {
 export default function StudentHeader() {
   const navigate = useNavigate();
   const { profile, loading } = useMyProfile();
+  const { theme, toggleTheme } = useTheme();
 
   const logout = async () => {
     await supabase.auth.signOut();
@@ -63,11 +65,27 @@ export default function StudentHeader() {
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button
               className="c-ctl c-btn"
+              type="button"
+              onClick={toggleTheme}
+              title="테마 전환"
+              style={{ fontWeight: 900 }}
+            >
+              {theme === "dark" ? "라이트" : "다크"}
+            </button>
+
+            <button
+              className="c-ctl c-btn"
+              type="button"
               onClick={() => navigate("/student/calendar")}
             >
               이번 주
             </button>
-            <button className="c-ctl c-btn c-btn--danger" onClick={logout}>
+
+            <button
+              className="c-ctl c-btn c-btn--danger"
+              type="button"
+              onClick={logout}
+            >
               로그아웃
             </button>
           </div>
