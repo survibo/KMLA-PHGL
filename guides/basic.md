@@ -8,6 +8,6 @@ https://www.youtube.com/watch?v=sB6bPOvvlgw
    <img width="2214" height="496" alt="image" src="https://github.com/user-attachments/assets/bea24900-f95f-4bfa-9dc4-e3d589a75888" />
 
 
-3) scheme.md code로 복사해서 supabase sql editor에 넣기
+3) SCHEME.md code로 복사해서 supabase sql editor에 넣기
 
 4) 알아서 잘
