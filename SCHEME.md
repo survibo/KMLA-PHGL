@@ -1,4 +1,29 @@
 -- =====================================================
+-- RESET BLOCK (데이터/테이블/RLS/정책/트리거 전부 삭제)
+-- 이 블록을 맨 위에 붙여넣고 실행한 뒤, 아래에 생성 스크립트 실행
+-- =====================================================
+
+-- 0) auth.users 쪽 트리거 먼저 제거 (profiles 자동생성 트리거)
+drop trigger if exists on_auth_user_created on auth.users;
+
+-- 1) 테이블 제거 (테이블에 붙은 RLS/Policies/Indexes/Triggers는 같이 삭제됨)
+drop table if exists public.absences cascade;
+drop table if exists public.events cascade;
+drop table if exists public.profiles cascade;
+
+-- 2) 함수 제거 (의존성 때문에 테이블 드롭 후에 하는 게 안전)
+drop function if exists public.handle_new_user() cascade;
+drop function if exists public.block_role_approved_changes() cascade;
+drop function if exists public.is_teacher() cascade;
+drop function if exists public.set_updated_at() cascade;
+
+-- 3) 타입 제거
+drop type if exists public.user_role cascade;
+
+-- 4) (선택) UUID 생성용. 이미 있으면 아무 변화 없음.
+create extension if not exists pgcrypto;
+
+-- =====================================================
 -- 0. ENUM: user_role
 -- =====================================================
 do $$ begin
