@@ -59,6 +59,7 @@ export default function TeacherHeader() {
 
       <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
         <Tab to="/teacher/students" label="학생 관리" />
+        <Tab to="/teacher/absences" label="결석" /> {/* ✅ 추가 */}
         {/* ✅ 추가 */}
         <Tab to="/teacher/calendar/first" label="캘린더" />
         <Tab to="/teacher/profile" label="내 정보" />

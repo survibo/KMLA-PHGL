@@ -9,6 +9,7 @@ import MyProfile from "./pages/MyProfile";
 import MyProfileEdit from "./pages/MyProfileEdit";
 import TeacherStudents from "./pages/teacher/TeacherStudents";
 import TeacherCalendar from "./pages/teacher/TeacherCalendar";
+import TeacherAbsences from "./pages/teacher/TeacherAbsence";
 
 import ProtectedRoute from "./components/ProtectedRoute";
 import Pending from "./pages/student/Pending";
@@ -115,6 +116,17 @@ export default function App() {
           <ProtectedRoute allowRole="teacher">
             <TeacherLayout>
               <TeacherCalendar />
+            </TeacherLayout>
+          </ProtectedRoute>
+        }
+      />
+
+       <Route
+        path="/teacher/absences"
+        element={
+          <ProtectedRoute allowRole="teacher">
+            <TeacherLayout>
+              <TeacherAbsences />
             </TeacherLayout>
           </ProtectedRoute>
         }

@@ -1,26 +1,28 @@
 -- =====================================================
--- RESET BLOCK (데이터/테이블/RLS/정책/트리거 전부 삭제)
--- 이 블록을 맨 위에 붙여넣고 실행한 뒤, 아래에 생성 스크립트 실행
+-- FULL RESET + CREATE (ABSENCES STATUS CONTROL INCLUDED)
+-- 실행: 이 블록 전체를 SQL Editor에 그대로 붙여넣고 실행
 -- =====================================================
 
 -- 0) auth.users 쪽 트리거 먼저 제거 (profiles 자동생성 트리거)
 drop trigger if exists on_auth_user_created on auth.users;
 
--- 1) 테이블 제거 (테이블에 붙은 RLS/Policies/Indexes/Triggers는 같이 삭제됨)
+-- 1) 테이블 제거
 drop table if exists public.absences cascade;
 drop table if exists public.events cascade;
 drop table if exists public.profiles cascade;
 
--- 2) 함수 제거 (의존성 때문에 테이블 드롭 후에 하는 게 안전)
+-- 2) 함수 제거
 drop function if exists public.handle_new_user() cascade;
 drop function if exists public.block_role_approved_changes() cascade;
 drop function if exists public.is_teacher() cascade;
 drop function if exists public.set_updated_at() cascade;
+drop function if exists public.block_absence_illegal_updates() cascade;
 
 -- 3) 타입 제거
 drop type if exists public.user_role cascade;
+drop type if exists public.absence_status cascade;
 
--- 4) (선택) UUID 생성용. 이미 있으면 아무 변화 없음.
+-- 4) (선택) UUID 생성용
 create extension if not exists pgcrypto;
 
 -- =====================================================
@@ -32,6 +34,17 @@ exception
   when duplicate_object then null;
 end $$;
 
+-- =====================================================
+-- 0-b. ENUM: absence_status
+-- pending: 제출됨(대기)
+-- approved : 승인
+-- rejected : 반려
+-- =====================================================
+do $$ begin
+  create type public.absence_status as enum ('pending', 'approved', 'rejected');
+exception
+  when duplicate_object then null;
+end $$;
 
 -- =====================================================
 -- 1. 공통 함수: updated_at 자동 갱신
@@ -43,7 +56,6 @@ begin
   return new;
 end;
 $$ language plpgsql;
-
 
 -- =====================================================
 -- 2. profiles
@@ -68,9 +80,8 @@ create trigger trg_profiles_updated_at
 before update on public.profiles
 for each row execute function public.set_updated_at();
 
-
 -- =====================================================
--- 3. events (UPDATED: date + duration_min)
+-- 3. events
 -- =====================================================
 create table if not exists public.events (
   id uuid primary key default gen_random_uuid(),
@@ -78,9 +89,9 @@ create table if not exists public.events (
 
   title text not null,
   description text,
-  category text not null,    -- '기초 역량 강화' | '진로 탐색' (프론트에서 제한)
-  date date not null,        -- 학습한 날짜
-  duration_min int not null, -- 소요 시간(분)
+  category text not null,
+  date date not null,
+  duration_min int not null,
 
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -94,9 +105,8 @@ for each row execute function public.set_updated_at();
 create index if not exists idx_events_owner_date
 on public.events(owner_id, date);
 
-
 -- =====================================================
--- 4. absences
+-- 4. absences (status: ENUM)
 -- =====================================================
 create table if not exists public.absences (
   id uuid primary key default gen_random_uuid(),
@@ -104,7 +114,7 @@ create table if not exists public.absences (
 
   date date not null,
   reason text not null,
-  status text not null default 'submitted',
+  status public.absence_status not null default 'pending',
 
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -117,7 +127,6 @@ for each row execute function public.set_updated_at();
 
 create index if not exists idx_absences_student_date
 on public.absences(student_id, date);
-
 
 -- =====================================================
 -- 5. auth.users → profiles 자동 생성
@@ -141,14 +150,12 @@ create trigger on_auth_user_created
 after insert on auth.users
 for each row execute function public.handle_new_user();
 
-
 -- =====================================================
 -- 6. RLS ENABLE
 -- =====================================================
 alter table public.profiles enable row level security;
 alter table public.events enable row level security;
 alter table public.absences enable row level security;
-
 
 -- =====================================================
 -- 7. helper: 승인된 teacher 여부
@@ -163,7 +170,6 @@ returns boolean as $$
       and p.approved = true
   );
 $$ language sql stable security definer;
-
 
 -- =====================================================
 -- 8. PROFILES POLICIES
@@ -193,7 +199,6 @@ with check (
   or public.is_teacher()
 );
 
-
 -- =====================================================
 -- 9. PROFILES SAFETY TRIGGER
 -- role / approved 변경 차단 (학생)
@@ -201,7 +206,6 @@ with check (
 create or replace function public.block_role_approved_changes()
 returns trigger as $$
 begin
-  -- SQL Editor / 관리자 컨텍스트 허용
   if auth.uid() is null then
     return new;
   end if;
@@ -225,7 +229,6 @@ create trigger trg_block_role_approved_changes
 before update on public.profiles
 for each row
 execute function public.block_role_approved_changes();
-
 
 -- =====================================================
 -- 10. EVENTS POLICIES
@@ -271,7 +274,6 @@ using (
   owner_id = auth.uid()
 );
 
-
 -- =====================================================
 -- 11. ABSENCES POLICIES
 -- =====================================================
@@ -286,7 +288,7 @@ using (
   or public.is_teacher()
 );
 
--- insert
+-- insert (학생만)
 drop policy if exists absences_insert_own on public.absences;
 create policy absences_insert_own
 on public.absences
@@ -295,19 +297,23 @@ with check (
   student_id = auth.uid()
 );
 
--- update
+-- update (학생 or 승인된 teacher)  ✅ teacher update 허용(단, 트리거가 status만 허용)
 drop policy if exists absences_update_own on public.absences;
-create policy absences_update_own
+drop policy if exists absences_update_own_or_teacher on public.absences;
+
+create policy absences_update_own_or_teacher
 on public.absences
 for update
 using (
   student_id = auth.uid()
+  or public.is_teacher()
 )
 with check (
   student_id = auth.uid()
+  or public.is_teacher()
 );
 
--- delete
+-- delete (학생만)
 drop policy if exists absences_delete_own on public.absences;
 create policy absences_delete_own
 on public.absences
@@ -315,3 +321,53 @@ for delete
 using (
   student_id = auth.uid()
 );
+
+-- =====================================================
+-- 11-b. ABSENCES SAFETY TRIGGER
+-- teacher: status만 변경 가능
+-- student: status 변경 금지 (date/reason 수정은 허용)
+-- =====================================================
+create or replace function public.block_absence_illegal_updates()
+returns trigger as $$
+begin
+  -- SQL Editor / 관리자 컨텍스트 허용
+  if auth.uid() is null then
+    return new;
+  end if;
+
+  -- 승인된 teacher: status만 변경 가능
+  if public.is_teacher() then
+    if new.student_id is distinct from old.student_id then
+      raise exception 'teacher cannot change student_id';
+    end if;
+
+    if new.date is distinct from old.date then
+      raise exception 'teacher cannot change date';
+    end if;
+
+    if new.reason is distinct from old.reason then
+      raise exception 'teacher cannot change reason';
+    end if;
+
+    return new;
+  end if;
+
+  -- 학생: status 변경 금지 + student_id 변경 금지
+  if new.status is distinct from old.status then
+    raise exception 'student cannot change status';
+  end if;
+
+  if new.student_id is distinct from old.student_id then
+    raise exception 'student cannot change student_id';
+  end if;
+
+  return new;
+end;
+$$ language plpgsql;
+
+drop trigger if exists trg_block_absence_illegal_updates on public.absences;
+
+create trigger trg_block_absence_illegal_updates
+before update on public.absences
+for each row
+execute function public.block_absence_illegal_updates();
