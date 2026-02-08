@@ -280,13 +280,13 @@ export default function TeacherAbsences() {
         >
           {/* ✅ "마지막 처리자" 컬럼 추가 */}
           <colgroup>
-            <col style={{ width: "9%" }} /> {/* 학생 */}
+            <col style={{ width: "12%" }} /> {/* 학생 */}
             <col style={{ width: "5%" }} />  {/* 반 */}
-            <col style={{ width: "9%" }} />  {/* 번호 */}
+            <col style={{ width: "11%" }} />  {/* 번호 */}
             <col style={{ width: "13%" }} /> {/* 날짜 */}
             <col style={{ width: "17%" }} /> {/* 요청일 */}
             <col style={{ width: "9%" }} /> {/* 상태 */}
-            <col style={{ width: "15%" }} /> {/* 마지막 처리자 */}
+            <col style={{ width: "10%" }} /> {/* 마지막 처리자 */}
             <col style={{ width: "23%" }} /> {/* 처리 */}
           </colgroup>
 
