@@ -1,8 +1,8 @@
 /* =========================================================
-   SINGLE CSS SOURCE (v1)
+   SINGLE CSS SOURCE (v2)
    1) Tokens (keep)
-   2) Reset + Base (keep)
-   3+) Rebuilt system (new)
+   2) Reset + Base (keep + PWA viewport hardening)
+   3+) Rebuilt system (stable for phone/pad/pc)
    ========================================================= */
 
 /* -------------------------
@@ -36,6 +36,16 @@
 
   --font: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
     "Apple SD Gothic Neo", "Noto Sans KR", Arial, sans-serif;
+
+  /* PWA viewport stabilizer (fallback) */
+  --vh: 100vh;
+}
+
+/* prefer dynamic viewport when supported (mobile address bar safe) */
+@supports (height: 100dvh) {
+  :root {
+    --vh: 100dvh;
+  }
 }
 
 [data-theme="dark"] {
@@ -110,10 +120,13 @@ body {
   color: var(--text-1);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+
+  /* PWA height stability */
+  min-height: var(--vh);
 }
 
 #root {
-  min-height: 100vh;
+  min-height: var(--vh);
   padding: env(safe-area-inset-top) env(safe-area-inset-right)
     env(safe-area-inset-bottom) env(safe-area-inset-left);
 }
@@ -171,6 +184,10 @@ body {
   border: 1px solid var(--border-subtle);
   background: var(--bg-1);
   color: var(--text-1);
+
+  /* normalize iOS form rendering */
+  -webkit-appearance: none;
+  appearance: none;
 }
 
 .c-input {
@@ -191,6 +208,9 @@ body {
   user-select: none;
   -webkit-tap-highlight-color: transparent;
   transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
+
+  /* touch environments */
+  touch-action: manipulation;
 }
 
 .c-btn:disabled {
@@ -204,6 +224,14 @@ body {
     background: var(--bg-hover);
   }
   .c-btn:active {
+    transform: translateY(1px);
+  }
+}
+
+/* active feedback for touch */
+@media (hover: none) and (pointer: coarse) {
+  .c-btn:active {
+    background: var(--bg-hover);
     transform: translateY(1px);
   }
 }
@@ -265,8 +293,21 @@ body {
   }
 }
 
+/* scale padding on bigger screens without introducing new layout system */
+@media (min-width: 721px) {
+  :root {
+    --pad: 18px;
+  }
+}
+
+@media (min-width: 1024px) {
+  :root {
+    --pad: 20px;
+  }
+}
+
 /* -------------------------
-   8) MODAL (optional but standard)
+   8) MODAL (standard)
 ------------------------- */
 .m-overlay {
   position: fixed;
@@ -275,6 +316,9 @@ body {
   display: grid;
   place-items: center;
   padding: 14px;
+
+  /* key for small screens + keyboards: allow scroll */
+  overflow: auto;
 }
 
 .m-backdrop {
@@ -295,6 +339,11 @@ body {
   background: var(--bg-1);
   border-radius: var(--radius-2);
   box-shadow: var(--shadow-1);
+
+  /* prevent modal from exceeding viewport */
+  max-height: calc(var(--vh) - 28px);
+  display: flex;
+  flex-direction: column;
 }
 
 .m-header {
@@ -311,6 +360,9 @@ body {
 
 .m-body {
   padding: 12px;
+
+  /* allow content scrolling inside modal */
+  overflow: auto;
 }
 
 .m-footer {
