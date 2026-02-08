@@ -8,6 +8,7 @@ import NotFound from "./pages/NotFound";
 import AuthCallback from "./pages/AuthCallback";
 import MyProfile from "./pages/MyProfile";
 import MyProfileEdit from "./pages/MyProfileEdit";
+import TeacherStudents from "./pages/teacher/TeacherStudents";
 
 import ProtectedRoute from "./components/ProtectedRoute";
 import Pending from "./pages/Pending";
@@ -80,6 +81,14 @@ export default function App() {
         element={
           <ProtectedRoute role="teacher">
             <MyProfileEdit />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/teacher/students"
+        element={
+          <ProtectedRoute allowRole="teacher">
+            <TeacherStudents />
           </ProtectedRoute>
         }
       />
