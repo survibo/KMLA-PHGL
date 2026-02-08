@@ -1,5 +1,5 @@
 -- =====================================================
--- FULL RESET + CREATE (ABSENCES STATUS CONTROL INCLUDED)
+-- FULL RESET + CREATE (ABSENCES STATUS CONTROL + WHO UPDATED INCLUDED)
 -- 실행: 이 블록 전체를 SQL Editor에 그대로 붙여넣고 실행
 -- =====================================================
 
@@ -107,6 +107,7 @@ on public.events(owner_id, date);
 
 -- =====================================================
 -- 4. absences (status: ENUM)
+-- + "누가/언제 status를 마지막으로 바꿨는지" 기록 컬럼 추가
 -- =====================================================
 create table if not exists public.absences (
   id uuid primary key default gen_random_uuid(),
@@ -115,6 +116,10 @@ create table if not exists public.absences (
   date date not null,
   reason text not null,
   status public.absence_status not null default 'pending',
+
+  -- ✅ status 변경 기록
+  status_updated_by uuid references public.profiles(id),
+  status_updated_at timestamptz,
 
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -127,6 +132,12 @@ for each row execute function public.set_updated_at();
 
 create index if not exists idx_absences_student_date
 on public.absences(student_id, date);
+
+create index if not exists idx_absences_status_updated_by
+on public.absences(status_updated_by);
+
+create index if not exists idx_absences_status_updated_at
+on public.absences(status_updated_at);
 
 -- =====================================================
 -- 5. auth.users → profiles 자동 생성
@@ -297,7 +308,7 @@ with check (
   student_id = auth.uid()
 );
 
--- update (학생 or 승인된 teacher)  ✅ teacher update 허용(단, 트리거가 status만 허용)
+-- update (학생 or 승인된 teacher)
 drop policy if exists absences_update_own on public.absences;
 drop policy if exists absences_update_own_or_teacher on public.absences;
 
@@ -324,7 +335,7 @@ using (
 
 -- =====================================================
 -- 11-b. ABSENCES SAFETY TRIGGER
--- teacher: status만 변경 가능
+-- teacher: status만 변경 가능 + status 변경자/시간은 자동 기록(추가 컬럼)
 -- student: status 변경 금지 (date/reason 수정은 허용)
 -- =====================================================
 create or replace function public.block_absence_illegal_updates()
@@ -335,7 +346,13 @@ begin
     return new;
   end if;
 
-  -- 승인된 teacher: status만 변경 가능
+  -- ✅ status가 바뀌면 "누가/언제" 기록 (approved/rejected/pending 모두 포함)
+  if new.status is distinct from old.status then
+    new.status_updated_by := auth.uid();
+    new.status_updated_at := now();
+  end if;
+
+  -- 승인된 teacher: status(+자동 기록 컬럼)만 변경 가능
   if public.is_teacher() then
     if new.student_id is distinct from old.student_id then
       raise exception 'teacher cannot change student_id';
@@ -366,7 +383,6 @@ end;
 $$ language plpgsql;
 
 drop trigger if exists trg_block_absence_illegal_updates on public.absences;
-
 create trigger trg_block_absence_illegal_updates
 before update on public.absences
 for each row

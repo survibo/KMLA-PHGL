@@ -22,15 +22,19 @@ export default function TeacherStudents() {
   // ✅ 전체 승인 진행 상태
   const [bulkApproving, setBulkApproving] = useState(false);
 
+  // ✅ teacher 권한 부여 모달
+  const [grantTarget, setGrantTarget] = useState(null); // profiles row
+  const [grantingId, setGrantingId] = useState(null);
+
   useEffect(() => {
     const load = async () => {
       setLoading(true);
       setError("");
 
+      // ✅ role 조건 제거(teacher/기타가 있어도 화면에서는 student만 보여주면 됨)
       const { data, error } = await supabase
         .from("profiles")
-        .select("id, name, grade, class_no, student_no, approved, role")
-        .eq("role", "student");
+        .select("id, name, grade, class_no, student_no, approved, role");
 
       if (error) {
         setError(error.message);
@@ -45,8 +49,9 @@ export default function TeacherStudents() {
     load();
   }, []);
 
+  // ✅ 화면에 보여줄 "학생"만 (DB에는 teacher도 있을 수 있으니 여기서 필터)
   const filtered = useMemo(() => {
-    let list = students;
+    let list = students.filter((s) => (s.role ?? "student") === "student");
 
     if (search.trim()) {
       const q = search.trim().toLowerCase();
@@ -76,11 +81,9 @@ export default function TeacherStudents() {
     return filtered.filter((s) => !s.approved);
   }, [filtered]);
 
-  // ✅ 캘린더 뷰어 order 쿼리 결정 (학생 관리 정렬 의도를 반영)
+  // ✅ 캘린더 뷰어 order 쿼리 결정
   const calendarOrder = useMemo(() => {
-    // 반 기준으로 보고 있으면 캘린더도 반순 시작
     if (sortKey === SORTS.CLASS_NO) return "class";
-    // 나머지는 기본 학번순
     return "student_no";
   }, [sortKey]);
 
@@ -148,6 +151,52 @@ export default function TeacherStudents() {
     }
   };
 
+  // =========================
+  // ✅ 선생님 권한 부여 (role=teacher, approved=true)
+  // =========================
+  const openGrantModal = (student) => setGrantTarget(student);
+
+  const closeGrantModal = () => {
+    if (grantingId) return; // 처리중엔 닫기 막음
+    setGrantTarget(null);
+  };
+
+  const grantTeacherRole = async () => {
+    if (!grantTarget) return;
+
+    const s = grantTarget;
+
+    // ✅ 모달(1차) + confirm(2차)
+    const ok = window.confirm(
+      `진짜로 "${s.name ?? "사용자"}"에게 선생님 권한을 부여할까요?\n(role=teacher, approved=true)`
+    );
+    if (!ok) return;
+
+    try {
+      setGrantingId(s.id);
+
+      const { data, error } = await supabase
+        .from("profiles")
+        .update({ role: "teacher", approved: true })
+        .eq("id", s.id)
+        .select("id, name, grade, class_no, student_no, approved, role")
+        .single();
+
+      if (error) throw error;
+
+      // 로컬 업데이트
+      setStudents((prev) => prev.map((p) => (p.id === s.id ? data : p)));
+
+      // student 목록 화면이므로, 승격되면 자동으로 목록에서 사라짐(role 필터 때문에)
+      setGrantTarget(null);
+      window.alert(`완료: ${data.name ?? "사용자"} → 선생님 권한 부여됨`);
+    } catch (err) {
+      window.alert(`선생님 권한 부여 실패: ${err?.message ?? String(err)}`);
+    } finally {
+      setGrantingId(null);
+    }
+  };
+
   if (loading) {
     return (
       <div className="l-page">
@@ -196,12 +245,22 @@ export default function TeacherStudents() {
               type="button"
               className="c-ctl c-btn"
               onClick={approveAllFiltered}
-              disabled={bulkApproving || pendingInFiltered.length === 0 || updatingId != null}
+              disabled={
+                bulkApproving ||
+                pendingInFiltered.length === 0 ||
+                updatingId != null ||
+                grantingId != null
+              }
               title="현재 목록에서 대기 중인 학생을 모두 승인"
               style={{
                 fontWeight: 900,
                 opacity:
-                  bulkApproving || pendingInFiltered.length === 0 || updatingId != null ? 0.6 : 1,
+                  bulkApproving ||
+                  pendingInFiltered.length === 0 ||
+                  updatingId != null ||
+                  grantingId != null
+                    ? 0.6
+                    : 1,
               }}
             >
               {bulkApproving ? "전체 승인 중..." : `전체 승인 (${pendingInFiltered.length}명)`}
@@ -226,7 +285,11 @@ export default function TeacherStudents() {
           <div className="r-split">
             <div className="f-field">
               <div className="f-label">정렬 기준</div>
-              <select className="c-ctl c-input" value={sortKey} onChange={(e) => setSortKey(e.target.value)}>
+              <select
+                className="c-ctl c-input"
+                value={sortKey}
+                onChange={(e) => setSortKey(e.target.value)}
+              >
                 <option value={SORTS.STUDENT_NO}>학번</option>
                 <option value={SORTS.CLASS_NO}>반</option>
                 <option value={SORTS.APPROVED}>승인 여부</option>
@@ -245,13 +308,15 @@ export default function TeacherStudents() {
             * 승인 취소는 확인창이 뜹니다. 승인 처리(대기 → 승인)는 즉시 반영됩니다.
             <br />
             * 전체 승인은 현재 목록(검색/정렬 반영)에서 <b>대기 중</b> 학생만 승인합니다.
+            <br />
+            * 선생님 권한 부여는 <b>승인된 선생님</b>만 가능합니다(RLS).
           </div>
         </div>
       </div>
 
       {/* Table */}
       <div className="u-panel" style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 900 }}>
           <thead>
             <tr style={{ background: "var(--bg-2)" }}>
               <Th>이름</Th>
@@ -259,13 +324,14 @@ export default function TeacherStudents() {
               <Th>반</Th>
               <Th>번호</Th>
               <Th>승인</Th>
+              <Th>권한</Th>
               <Th>캘린더</Th>
             </tr>
           </thead>
 
           <tbody>
             {filtered.map((s) => {
-              const busy = updatingId === s.id || bulkApproving;
+              const busy = updatingId === s.id || bulkApproving || grantingId != null;
 
               const statusText = s.approved ? "승인됨" : "대기";
               const statusColor = s.approved ? "var(--text-1)" : "var(--text-muted)";
@@ -309,6 +375,7 @@ export default function TeacherStudents() {
                   <Td>{s.class_no ?? "-"}</Td>
                   <Td>{s.student_no ?? "-"}</Td>
 
+                  {/* 승인 */}
                   <Td>
                     <div
                       style={{
@@ -339,7 +406,42 @@ export default function TeacherStudents() {
                     </div>
                   </Td>
 
-                  {/* ✅ 별도 캘린더 버튼도 제공(명확성) */}
+                  {/* 권한(선생님 권한 주기 버튼) */}
+                  <Td>
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 8,
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <span style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 900 }}>
+                        학생
+                      </span>
+
+                      <button
+                        type="button"
+                        className="c-ctl c-btn"
+                        disabled={busy}
+                        onClick={() => openGrantModal(s)}
+                        title="선생님 권한 부여"
+                        style={{
+                          fontWeight: 900,
+                          opacity: busy ? 0.6 : 1,
+
+                          // ✅ CSS 파일 안 건드리고 '악센트' 느낌만 inline로 줌
+                          borderColor: "var(--border-focus)",
+                          background: "var(--bg-2)",
+                        }}
+                      >
+                        선생님 권한 주기
+                      </button>
+                    </div>
+                  </Td>
+
+                  {/* 캘린더 */}
                   <Td>
                     <Link
                       to={calTo}
@@ -363,7 +465,7 @@ export default function TeacherStudents() {
 
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={6} style={{ padding: 18, textAlign: "center", color: "var(--text-muted)" }}>
+                <td colSpan={7} style={{ padding: 18, textAlign: "center", color: "var(--text-muted)" }}>
                   검색 결과가 없습니다.
                 </td>
               </tr>
@@ -371,6 +473,82 @@ export default function TeacherStudents() {
           </tbody>
         </table>
       </div>
+
+      {/* ✅ Modal (CSS는 이미 있음: m-overlay/m-backdrop/m-box/...) */}
+      {grantTarget ? (
+        <div className="m-overlay" role="dialog" aria-modal="true">
+          <button className="m-backdrop" onClick={closeGrantModal} aria-label="닫기" />
+
+          <div className="m-box">
+            <div className="m-header">
+              <div className="m-title">선생님 권한 부여</div>
+
+              <button
+                type="button"
+                className="c-ctl c-btn"
+                onClick={closeGrantModal}
+                disabled={grantingId != null}
+              >
+                닫기
+              </button>
+            </div>
+
+            <div className="m-body">
+              <div style={{ fontSize: 13, color: "var(--text-2)", fontWeight: 800 }}>
+                아래 사용자에게 선생님 권한을 부여할까요?
+              </div>
+
+              <div
+                style={{
+                  marginTop: 10,
+                  padding: 12,
+                  border: "1px solid var(--border-subtle)",
+                  borderRadius: 10,
+                }}
+              >
+                <div style={{ fontWeight: 900 }}>{grantTarget.name ?? "-"}</div>
+                <div style={{ marginTop: 4, fontSize: 12, color: "var(--text-muted)", fontWeight: 800 }}>
+                  id: {grantTarget.id}
+                </div>
+                <div style={{ marginTop: 6, fontSize: 12, color: "var(--text-muted)", fontWeight: 800 }}>
+                  변경 내용: role = teacher, approved = true
+                </div>
+              </div>
+
+              <div className="u-alert u-alert--error" style={{ marginTop: 12 }}>
+                주의: 선생님 권한은 전체 학생 조회/승인/결석 처리 권한을 포함합니다.
+              </div>
+            </div>
+
+            <div className="m-footer">
+              <button
+                type="button"
+                className="c-ctl c-btn"
+                onClick={closeGrantModal}
+                disabled={grantingId != null}
+              >
+                취소
+              </button>
+
+              <button
+                type="button"
+                className="c-ctl c-btn"
+                onClick={grantTeacherRole}
+                disabled={grantingId != null}
+                style={{
+                  fontWeight: 900,
+
+                  // ✅ 악센트 inline
+                  borderColor: "var(--border-focus)",
+                  background: "var(--bg-2)",
+                }}
+              >
+                {grantingId ? "부여 중..." : "확인하고 부여"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

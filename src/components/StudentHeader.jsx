@@ -1,5 +1,6 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
+import { useMyProfile } from "../hooks/useMyProfile";
 
 function Tab({ to, label }) {
   return (
@@ -23,6 +24,7 @@ function Tab({ to, label }) {
 
 export default function StudentHeader() {
   const navigate = useNavigate();
+  const { profile, loading } = useMyProfile();
 
   const logout = async () => {
     await supabase.auth.signOut();
@@ -54,7 +56,9 @@ export default function StudentHeader() {
             alignItems: "center",
           }}
         >
-          <div style={{ fontWeight: 900 }}>학생</div>
+          <div style={{ fontWeight: 900 }}>
+            {loading ? "..." : profile?.name ?? "학생"}
+          </div>
 
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button
@@ -63,10 +67,7 @@ export default function StudentHeader() {
             >
               이번 주
             </button>
-            <button
-              className="c-ctl c-btn c-btn--danger"
-              onClick={logout}
-            >
+            <button className="c-ctl c-btn c-btn--danger" onClick={logout}>
               로그아웃
             </button>
           </div>

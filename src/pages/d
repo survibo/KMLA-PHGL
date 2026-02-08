@@ -1,4 +1,5 @@
-PROJECT GUIDE — React + Supabase Student/Teacher Web App (v2)
+PROJECT GUIDE — React + Supabase Student/Teacher Web App (v2.1.1)
+
 ============================================================
 
 너는 React + Supabase 기반 웹앱을 함께 개발하는 기술 파트너다.
@@ -9,65 +10,72 @@ PROJECT GUIDE — React + Supabase Student/Teacher Web App (v2)
 "왜 필요한지 → 그 다음 코드"
 순서로 한다.
 
-==================================================
+============================================================
 [프로젝트 목적]
-==================================================
+============================================================
 
-- 학생
-  - 주간 학습 일정(events) 관리
-  - 결석(absences) 제출
-  - 본인 프로필 조회/수정
+학생
+- 주간 학습 일정(events) 관리
+- 결석(absences) 제출
+- 본인 프로필 조회/수정
 
-- 선생님
-  - 전체 학생 조회
-  - 학생 승인 관리 (approved 토글)
-  - 학생 결석 확인
-  - 본인 프로필 조회/수정
+선생님
+- 전체 학생 조회
+- 학생 승인 관리 (approved 토글)
+- 학생 결석 확인 및 처리(승인/반려/되돌리기)
+- 본인 프로필 조회/수정
 
-==================================================
+============================================================
 [기술 스택]
-==================================================
+============================================================
 
 - React + Vite
 - react-router-dom
 - Supabase (Google OAuth)
 
-==================================================
+============================================================
 [UI / 스타일 시스템 (중요, 확정)]
-==================================================
+============================================================
 
-❗ Tailwind CSS 전면 제거
-❗ UI 라이브러리 미사용
+Tailwind CSS 전면 제거
+UI 라이브러리 미사용
 
 - 순수 JSX + 단일 CSS 시스템 사용
 - CSS 변수 기반 라이트 / 다크 테마
 - PWA 대응 (모바일 / 태블릿 / 데스크톱 전부 고려)
 
-### CSS 아키텍처 (확정)
+CSS 아키텍처 (확정)
 
-- 레이아웃
-  - l-page : max-width 제한 콘텐츠 영역
-- 컨트롤
-  - c-ctl : 모든 버튼/입력 기본
-  - c-btn : 버튼
-  - c-btn--danger : 위험 액션
-  - c-input : input/select/textarea
-- 유틸
-  - u-panel : section 박스
-  - u-alert / u-alert--error
-- 폼
-  - f-field / f-label / f-hint
+레이아웃
+- l-page : max-width 제한 콘텐츠 영역
 
-기존 className / card / container / button 등은 **전부 폐기**됨.
+컨트롤
+- c-ctl : 모든 버튼/입력 기본
+- c-btn : 버튼
+- c-btn--danger : 위험 액션
+- c-input : input/select/textarea
 
-==================================================
+유틸
+- u-panel : section 박스
+- u-alert
+- u-alert--error
+
+폼
+- f-field
+- f-label
+- f-hint
+
+기존 className / card / container / button 등은 전부 폐기됨.
+
+============================================================
 [헤더 구조 (확정)]
-==================================================
+============================================================
 
 - 학생 전용 Header / 선생 전용 Header 분리
-- Header는 **width 100%**
+- Header는 width 100%
 - 내부 콘텐츠만 l-page로 폭 제한
-- Layout 구조:
+
+Layout 구조
 
 [ Header (full width) ]
 [ main.l-page (페이지 콘텐츠) ]
@@ -75,38 +83,34 @@ PROJECT GUIDE — React + Supabase Student/Teacher Web App (v2)
 - Header는 ProtectedRoute 내부에서만 렌더링됨
 - 공개 페이지(login / pending)는 헤더 없음
 
-==================================================
+============================================================
 [DB 구조 (확정)]
-==================================================
+============================================================
 
-❗ DB 구조 변경 완료 (이제 이 상태가 최종)
+profiles
+- id (auth.users FK)
+- role: enum('student','teacher')
+- approved: boolean
+- name, grade, class_no, student_no
+- created_at, updated_at
 
-- profiles
-  - id (auth.users FK)
-  - role: enum('student','teacher')
-  - approved: boolean
-  - name, grade, class_no, student_no
-  - created_at, updated_at
+events
+- id
+- owner_id (profiles.id)
+- date (YYYY-MM-DD)
+- category (text)
+- title (필수)
+- description (선택)
+- duration_min (int)
+- created_at, updated_at
 
-- events
-  - id
-  - owner_id (profiles.id)
-  - date (date, YYYY-MM-DD)
-  - category: text
-    - "기초 역량 강화"
-    - "진로 탐색"
-  - title (필수, 자유 텍스트)
-  - description (선택)
-  - duration_min (int, 소요 시간 분 단위)
-  - created_at, updated_at
-
-- absences
-  - id
-  - student_id (profiles.id)
-  - date
-  - reason
-  - status
-  - created_at, updated_at
+absences
+- id
+- student_id (profiles.id)
+- date
+- reason
+- status: enum('pending','approved','rejected')
+- created_at, updated_at
 
 - auth.users → profiles 자동 생성 trigger 존재
 - updated_at 자동 갱신 trigger 존재
@@ -114,76 +118,65 @@ PROJECT GUIDE — React + Supabase Student/Teacher Web App (v2)
 - is_teacher() helper function 존재
 - role / approved 변경 차단 trigger 존재
 
-==================================================
+============================================================
 [RLS / 권한 규칙 (확정)]
-==================================================
+============================================================
 
-- helper function: is_teacher()
-  - role='teacher' AND approved=true 일 때만 true
+is_teacher()
+- role='teacher' AND approved=true
 
-- profiles
-  - select/update: 본인 OR 승인된 teacher
-  - role / approved:
-    - teacher만 변경 가능
-    - 학생은 DB 트리거로 변경 차단
-    - SQL Editor(auth.uid() IS NULL)에서는 트리거 통과
+profiles
+- select/update: 본인 OR 승인된 teacher
+- role / approved:
+  - teacher만 변경 가능
+  - 학생은 DB 트리거로 변경 차단
 
-- events
-  - 학생: owner_id = auth.uid() 인 것만 CRUD
-  - teacher: 전체 select 가능 (수정/삭제 불가)
+events
+- 학생: owner_id = auth.uid() 인 것만 CRUD
+- teacher: 전체 select 가능 (수정/삭제 불가)
 
-- absences
-  - 학생: student_id = auth.uid() 인 것만 CRUD
-  - teacher: 전체 select 가능
+absences
+- 학생
+  - insert 가능 (date, reason만)
+  - status 변경 불가
+- teacher
+  - 전체 select 가능
+  - update는 status만 가능
+  - date / reason / student_id 변경 불가
 
-==================================================
+============================================================
 [프론트 권한 흐름 (확정)]
-==================================================
+============================================================
 
-- 핵심 훅: useMyProfile()
+핵심 훅: useMyProfile()
 
-### useMyProfile 동작
+1) supabase.auth.getSession()
+2) profiles 조회
+   - id, role, approved, name, grade, class_no, student_no
+3) 승인/role은 update payload에 포함 금지
 
-1) supabase.auth.getSession()으로 session 복구
-2) profiles에서
-   id, role, approved, name, grade, class_no, student_no 조회
-3) 승인/role은 절대 update payload에 포함하지 않음
+추가
+- auth state change 시 재조회
+- 포커스 복귀 시 재조회
+- approved 변경 즉시 반영
 
-### 추가로 구현된 중요한 동작
-
-- auth state change 시 profile 재조회
-- 앱 포커스 복귀 / 탭 활성화 시 profile 재조회
-- approved 상태가 DB에서 바뀌면 다음 포커스 시 즉시 반영됨
-- stale profile 문제 해결됨
-
-useMyProfile는 다음을 반환함:
-- loading
-- session
-- profile
-- refreshProfile()
-- refreshProfileSilent()
-
-==================================================
+============================================================
 [ProtectedRoute 규칙 (확정)]
-==================================================
+============================================================
 
-ProtectedRoute({ allowRole, children })
+ProtectedRoute({ allowRole })
 
-처리 순서:
 1) loading → Loading
 2) !session → /login
 3) !profile → /login
-4) !profile.approved → /pending
-5) allowRole 불일치:
+4) !approved → /pending
+5) role mismatch
    - teacher → /teacher
    - student → /student/calendar
 
-❗ ProtectedRoute는 승인 판단만 담당
-❗ 승인 상태 최신화 책임은 useMyProfile
-
-==================================================
+============================================================
 [라우팅 구조 (확정)]
-==================================================
+============================================================
 
 /login
 /auth/callback
@@ -194,58 +187,48 @@ ProtectedRoute({ allowRole, children })
 /student/profile
 /student/profile/edit
 
-/teacher                → TeacherStudents로 리다이렉트
+/teacher → /teacher/students
 /teacher/students
+/teacher/calendar/:studentId
+/teacher/absences
 /teacher/profile
 /teacher/profile/edit
 
-그 외 → 404 → 메인 이동 버튼 제공
+============================================================
+[결석 UI 규칙 — TeacherAbsences 최신]
+============================================================
 
-==================================================
-[구현 완료 페이지]
-==================================================
+- 기본 정렬: created_at DESC (요청일 최신순)
+- 초기 sortKey = CREATED
+- 초기 asc = false
+- 요청일(created_at) 컬럼 테이블에 표시
+- DB 변경 없이 프론트 포맷만 적용
 
-1) StudentCalendar
-- 주간 캘린더 (월~일)
-- 하루 선택 후 일정 추가 (modal)
-- category 2종
-- 시간 입력 → duration_min 저장
-- 주간 합계 (카테고리별 총 시간) 표시
-- 모바일/태블릿 한 화면 UX 고려
+============================================================
+[구현 완료]
+============================================================
 
-2) TeacherStudents
-- 학생 전체 조회
-- 이름 검색
-- 정렬 (학번 / 반 / 승인 여부)
-- 승인 토글
-  - 승인 → 즉시
-  - 취소 → confirm
-- row별 updating 상태 표시
-- Tailwind 제거, 단일 CSS 시스템 적용
+- StudentCalendar
+- TeacherStudents
+- TeacherCalendar
+- TeacherAbsences (요청일 컬럼 + 최신순)
+- MyProfile / Edit
+- Header / Layout
 
-3) MyProfile / MyProfileEdit
-- 학생/선생 공용
-- role 기반 edit 경로 분기
-- validation 포함
+============================================================
+[절대 금지]
+============================================================
 
-4) Header / Layout
-- 학생/선생 전용 헤더 분리
-- full-width header + 중앙 콘텐츠 구조
+- Auth / RLS / 승인 흐름 변경
+- DB 구조 변경
+- ProtectedRoute 우회
+- Tailwind / UI 라이브러리
+- 다른 CSS 시스템 도입
+- 설명 순서 위반
 
-==================================================
-[절대 금지 사항]
-==================================================
+============================================================
 
-- Auth / RLS / 승인 흐름 변경 제안
-- DB 구조 / 정책 / 트리거 변경 제안
-- ProtectedRoute 로직 우회
-- Tailwind / UI 라이브러리 재도입
-- 기존 CSS 시스템과 다른 스타일 도입
-- 설명 순서 무시 (항상 이유 → 코드)
-
-==================================================
-
-이 문서는 "현재 구현된 상태"의 단일 진실 원본이다.
-다음 작업은 이 문서를 전제로 진행한다.
+이 문서는 단일 진실 원본이다.
+다음 작업은 이 문서를 전제로 한다.
 
 END OF GUIDE
