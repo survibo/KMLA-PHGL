@@ -49,22 +49,23 @@
 }
 
 [data-theme="dark"] {
-  --bg-1: #000000;
-  --bg-2: #0b0b0b;
-  --bg-3: #141414;
-  --bg-hover: #202020;
-  --bg-hover-strong: #252525;
+  --bg-1: #121417;
+  --bg-2: #171a1f;
+  --bg-3: #1d2128;
+  --bg-hover: #242a33;
+  --bg-hover-strong: #2b3340;
 
-  --border-subtle: #222222;
-  --border-focus: #ffffff;
+  --border-subtle: #2a313b;
+  --border-focus: #f2f4f7;
 
-  --text-1: #ffffff;
-  --text-2: #cfcfcf;
-  --text-muted: #9a9a9a;
+  --text-1: #f2f4f7;
+  --text-2: #d2d7df;
+  --text-muted: #a3adba;
 
   --accent-danger: #ff6b6b;
-  --accent-danger-bg: rgba(255, 107, 107, 0.12);
+  --accent-danger-bg: rgba(255, 107, 107, 0.14);
 }
+
 
 /* -------------------------
    2) RESET + BASE (keep)
