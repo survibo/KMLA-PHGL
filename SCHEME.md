@@ -45,7 +45,7 @@ for each row execute function public.set_updated_at();
 
 
 -- =====================================================
--- 3. events
+-- 3. events (UPDATED: date + duration_min)
 -- =====================================================
 create table if not exists public.events (
   id uuid primary key default gen_random_uuid(),
@@ -53,10 +53,9 @@ create table if not exists public.events (
 
   title text not null,
   description text,
-  category text not null default 'general',
-
-  start_at timestamptz not null,
-  end_at timestamptz not null,
+  category text not null,    -- '기초 역량 강화' | '진로 탐색' (프론트에서 제한)
+  date date not null,        -- 학습한 날짜
+  duration_min int not null, -- 소요 시간(분)
 
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -67,8 +66,8 @@ create trigger trg_events_updated_at
 before update on public.events
 for each row execute function public.set_updated_at();
 
-create index if not exists idx_events_owner_start
-on public.events(owner_id, start_at);
+create index if not exists idx_events_owner_date
+on public.events(owner_id, date);
 
 
 -- =====================================================
