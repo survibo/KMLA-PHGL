@@ -64,6 +64,19 @@ export default function Login() {
             <br />
             학생 또는 선생님 페이지로 이동합니다.
           </div>
+
+          {/* ✅ 제작 주체 표기 */}
+          <div
+            style={{
+              marginTop: 6,
+              fontSize: 11,
+              color: "var(--text-muted)",
+              textAlign: "center",
+              opacity: 0.8,
+            }}
+          >
+            KMLA 과학기술부에서 제작한 PHGL 웹사이트입니다.
+          </div>
         </div>
       </div>
     </div>
