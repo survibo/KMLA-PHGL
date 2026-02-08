@@ -1,5 +1,5 @@
 -- =====================================================
--- FULL RESET + CREATE (ABSENCES STATUS CONTROL + WHO UPDATED INCLUDED)
+-- FULL RESET + CREATE (ABSENCES STATUS CONTROL + ROLE REVOKE AUDIT)
 -- 실행: 이 블록 전체를 SQL Editor에 그대로 붙여넣고 실행
 -- =====================================================
 
@@ -17,6 +17,7 @@ drop function if exists public.block_role_approved_changes() cascade;
 drop function if exists public.is_teacher() cascade;
 drop function if exists public.set_updated_at() cascade;
 drop function if exists public.block_absence_illegal_updates() cascade;
+drop function if exists public.audit_profile_role() cascade;
 
 -- 3) 타입 제거
 drop type if exists public.user_role cascade;
@@ -59,6 +60,7 @@ $$ language plpgsql;
 
 -- =====================================================
 -- 2. profiles
+-- + ✅ role 변경(권한 박탈 포함) 누가/언제 기록
 -- =====================================================
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
@@ -71,14 +73,47 @@ create table if not exists public.profiles (
   class_no int,
   student_no int,
 
+  -- ✅ role 변경 추적 (권한 박탈: teacher -> student)
+  role_updated_by uuid references public.profiles(id),
+  role_updated_at timestamptz,
+
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+create index if not exists idx_profiles_role_updated_by
+on public.profiles(role_updated_by);
+
+create index if not exists idx_profiles_role_updated_at
+on public.profiles(role_updated_at);
 
 drop trigger if exists trg_profiles_updated_at on public.profiles;
 create trigger trg_profiles_updated_at
 before update on public.profiles
 for each row execute function public.set_updated_at();
+
+-- ✅ role 변경 자동 기록 트리거
+create or replace function public.audit_profile_role()
+returns trigger as $$
+begin
+  if auth.uid() is null then
+    return new;
+  end if;
+
+  if new.role is distinct from old.role then
+    new.role_updated_by := auth.uid();
+    new.role_updated_at := now();
+  end if;
+
+  return new;
+end;
+$$ language plpgsql;
+
+drop trigger if exists trg_audit_profile_role on public.profiles;
+create trigger trg_audit_profile_role
+before update on public.profiles
+for each row
+execute function public.audit_profile_role();
 
 -- =====================================================
 -- 3. events
@@ -186,7 +221,6 @@ $$ language sql stable security definer;
 -- 8. PROFILES POLICIES
 -- =====================================================
 
--- select
 drop policy if exists profiles_select_own_or_teacher on public.profiles;
 create policy profiles_select_own_or_teacher
 on public.profiles
@@ -196,7 +230,6 @@ using (
   or public.is_teacher()
 );
 
--- update
 drop policy if exists profiles_update_own_or_teacher on public.profiles;
 create policy profiles_update_own_or_teacher
 on public.profiles
@@ -245,7 +278,6 @@ execute function public.block_role_approved_changes();
 -- 10. EVENTS POLICIES
 -- =====================================================
 
--- select
 drop policy if exists events_select_own_or_teacher on public.events;
 create policy events_select_own_or_teacher
 on public.events
@@ -255,7 +287,6 @@ using (
   or public.is_teacher()
 );
 
--- insert
 drop policy if exists events_insert_own on public.events;
 create policy events_insert_own
 on public.events
@@ -264,7 +295,6 @@ with check (
   owner_id = auth.uid()
 );
 
--- update
 drop policy if exists events_update_own on public.events;
 create policy events_update_own
 on public.events
@@ -276,7 +306,6 @@ with check (
   owner_id = auth.uid()
 );
 
--- delete
 drop policy if exists events_delete_own on public.events;
 create policy events_delete_own
 on public.events
@@ -289,7 +318,6 @@ using (
 -- 11. ABSENCES POLICIES
 -- =====================================================
 
--- select
 drop policy if exists absences_select_own_or_teacher on public.absences;
 create policy absences_select_own_or_teacher
 on public.absences
@@ -299,7 +327,6 @@ using (
   or public.is_teacher()
 );
 
--- insert (학생만)
 drop policy if exists absences_insert_own on public.absences;
 create policy absences_insert_own
 on public.absences
@@ -308,7 +335,6 @@ with check (
   student_id = auth.uid()
 );
 
--- update (학생 or 승인된 teacher)
 drop policy if exists absences_update_own on public.absences;
 drop policy if exists absences_update_own_or_teacher on public.absences;
 
@@ -324,7 +350,6 @@ with check (
   or public.is_teacher()
 );
 
--- delete (학생만)
 drop policy if exists absences_delete_own on public.absences;
 create policy absences_delete_own
 on public.absences
@@ -335,24 +360,21 @@ using (
 
 -- =====================================================
 -- 11-b. ABSENCES SAFETY TRIGGER
--- teacher: status만 변경 가능 + status 변경자/시간은 자동 기록(추가 컬럼)
+-- teacher: status만 변경 가능 + status 변경자/시간 자동 기록
 -- student: status 변경 금지 (date/reason 수정은 허용)
 -- =====================================================
 create or replace function public.block_absence_illegal_updates()
 returns trigger as $$
 begin
-  -- SQL Editor / 관리자 컨텍스트 허용
   if auth.uid() is null then
     return new;
   end if;
 
-  -- ✅ status가 바뀌면 "누가/언제" 기록 (approved/rejected/pending 모두 포함)
   if new.status is distinct from old.status then
     new.status_updated_by := auth.uid();
     new.status_updated_at := now();
   end if;
 
-  -- 승인된 teacher: status(+자동 기록 컬럼)만 변경 가능
   if public.is_teacher() then
     if new.student_id is distinct from old.student_id then
       raise exception 'teacher cannot change student_id';
@@ -369,7 +391,6 @@ begin
     return new;
   end if;
 
-  -- 학생: status 변경 금지 + student_id 변경 금지
   if new.status is distinct from old.status then
     raise exception 'student cannot change status';
   end if;
