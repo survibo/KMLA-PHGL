@@ -132,7 +132,7 @@ export default function MyProfileEdit() {
 
         <form onSubmit={onSubmit} className="l-section" style={{ marginTop: 12 }}>
           <div className="f-field">
-            <div className="f-label">이름</div>
+            <div className="f-label">이름(A, B표시)</div>
             <input
               className="c-ctl c-input"
               value={name}

@@ -23,8 +23,8 @@ function formatYmdHm(iso) {
   return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
 }
 
-// "권한 박탈" 정의: teacher였다가 student로 내려간 기록이 남아있는 케이스를 보여주려면
-// 최소한 role=student AND role_updated_at 존재 → 박탈로 간주
+// 권한 박탈 표시 기준(현 구조에서의 실무적 정의):
+// role=student 이면서 role_updated_at 존재 => teacher였다가 role이 내려간 기록으로 간주
 function isRevoked(p) {
   return (p.role ?? "student") === "student" && !!p.role_updated_at;
 }
@@ -37,18 +37,21 @@ export default function TeacherTeachers() {
   const [search, setSearch] = useState("");
   const [approved, setApproved] = useState("all"); // all | approved | pending
 
-  // ✅ 박탈 포함 표시 토글
+  // 박탈 포함 표시 토글
   const [includeRevoked, setIncludeRevoked] = useState(true);
 
-  // ✅ 기본: 최근 생성(가입) 순
+  // 기본: 최근 생성(가입) 순
   const [sortKey, setSortKey] = useState(SORTS.CREATED);
   const [asc, setAsc] = useState(false);
+
+  // ✅ 버튼 로딩 상태(권한 박탈 중)
+  const [updatingId, setUpdatingId] = useState(null);
 
   async function load() {
     setLoading(true);
     setError("");
 
-    // 1) profiles 기본 조회 (actor join 없이)
+    // 1) profiles 기본 조회
     const { data, error } = await supabase
       .from("profiles")
       .select(
@@ -65,7 +68,7 @@ export default function TeacherTeachers() {
 
     const list = data ?? [];
 
-    // 2) 마지막 처리자(권한 박탈/변경자) 프로필 같이 조회
+    // 2) role 변경자 프로필 조회(2nd query)
     const actorIds = list.map((p) => p.role_updated_by).filter(Boolean);
     const ids = Array.from(new Set(actorIds));
 
@@ -100,7 +103,31 @@ export default function TeacherTeachers() {
     load();
   }, []);
 
-  // ✅ teacher 목록 + (토글 시) 박탈된 teacher(현재 student, role_updated_at 있음) 포함
+  // ✅ 권한 박탈 버튼: role을 student로 변경
+  async function revokeTeacher(userId, userName) {
+    const ok = window.confirm(
+      `정말로 권한을 박탈할까요?\n대상: ${userName ?? "-"}\n(teacher → student)`
+    );
+    if (!ok) return;
+
+    try {
+      setUpdatingId(userId);
+
+      const { error } = await supabase
+        .from("profiles")
+        .update({ role: "student" })
+        .eq("id", userId);
+
+      if (error) throw error;
+
+      await load();
+    } catch (err) {
+      window.alert(`권한 박탈 실패: ${err?.message ?? String(err)}`);
+    } finally {
+      setUpdatingId(null);
+    }
+  }
+
   const teacherCandidates = useMemo(() => {
     if (!includeRevoked) {
       return rows.filter((p) => (p.role ?? "student") === "teacher");
@@ -179,14 +206,7 @@ export default function TeacherTeachers() {
     <div className="l-page">
       {/* Header */}
       <div className="u-panel" style={{ padding: 14 }}>
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            gap: 10,
-            flexWrap: "wrap",
-          }}
-        >
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
           <div>
             <div style={{ fontSize: 18, fontWeight: 900 }}>선생님 목록</div>
 
@@ -274,12 +294,13 @@ export default function TeacherTeachers() {
       <div className="u-panel" style={{ overflowX: "hidden" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
           <colgroup>
-            <col style={{ width: "18%" }} /> {/* 이름 */}
-            <col style={{ width: "12%" }} /> {/* 승인 */}
+            <col style={{ width: "16%" }} /> {/* 이름 */}
+            <col style={{ width: "10%" }} /> {/* 승인 */}
             <col style={{ width: "14%" }} /> {/* 현재 ROLE */}
             <col style={{ width: "18%" }} /> {/* 권한 박탈/변경자 */}
-            <col style={{ width: "18%" }} /> {/* 권한 박탈/변경일 */}
-            <col style={{ width: "20%" }} /> {/* ID */}
+            <col style={{ width: "16%" }} /> {/* 권한 박탈/변경일 */}
+            <col style={{ width: "16%" }} /> {/* ID */}
+            <col style={{ width: "10%" }} /> {/* 액션 */}
           </colgroup>
 
           <thead>
@@ -290,6 +311,7 @@ export default function TeacherTeachers() {
               <Th>권한 박탈/변경자</Th>
               <Th>권한 박탈/변경일</Th>
               <Th>ID</Th>
+              <Th>관리</Th>
             </tr>
           </thead>
 
@@ -299,7 +321,11 @@ export default function TeacherTeachers() {
               const revoked = isRevoked(t);
 
               const actorName = t.actor?.name ?? "-";
-              const actorTip = t.role_updated_at ? `${actorName} / ${formatYmdHm(t.role_updated_at)}` : actorName;
+              const actorTip = t.role_updated_at
+                ? `${actorName} / ${formatYmdHm(t.role_updated_at)}`
+                : actorName;
+
+              const busy = updatingId === t.id;
 
               return (
                 <tr key={t.id} style={{ borderTop: "1px solid var(--border-subtle)" }}>
@@ -323,6 +349,7 @@ export default function TeacherTeachers() {
                         background: "var(--bg-2)",
                         borderColor: "var(--border-subtle)",
                         color: t.approved ? "var(--text-1)" : "var(--text-muted)",
+                        opacity: busy ? 0.6 : 1,
                       }}
                       title={t.approved ? "승인됨" : "미승인"}
                     >
@@ -331,7 +358,7 @@ export default function TeacherTeachers() {
                   </Td>
 
                   <Td>
-                    <div style={{ fontWeight: 900 }}>
+                    <div style={{ fontWeight: 900, opacity: busy ? 0.6 : 1 }}>
                       {role === "teacher" ? "TEACHER" : "STUDENT"}
                       {revoked ? " (권한 박탈)" : ""}
                     </div>
@@ -339,23 +366,43 @@ export default function TeacherTeachers() {
 
                   <Td>
                     <div
-                      style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                      style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", opacity: busy ? 0.6 : 1 }}
                       title={actorTip}
                     >
-                      {revoked || t.role_updated_at ? actorName : "-"}
+                      {t.role_updated_at ? actorName : "-"}
                     </div>
                   </Td>
 
                   <Td>
-                    <div style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+                    <div style={{ overflow: "hidden", textOverflow: "ellipsis", opacity: busy ? 0.6 : 1 }}>
                       {t.role_updated_at ? formatYmdHm(t.role_updated_at) : "-"}
                     </div>
                   </Td>
 
                   <Td>
-                    <div style={{ fontSize: 12, color: "var(--text-muted)", wordBreak: "break-all" }}>
+                    <div style={{ fontSize: 12, color: "var(--text-muted)", wordBreak: "break-all", opacity: busy ? 0.6 : 1 }}>
                       {t.id}
                     </div>
+                  </Td>
+
+                  {/* ✅ 권한 박탈 버튼 */}
+                  <Td>
+                    <button
+                      type="button"
+                      className="c-ctl c-btn c-btn--danger"
+                      disabled={busy || role !== "teacher"}
+                      onClick={() => revokeTeacher(t.id, t.name)}
+                      style={{
+                        minHeight: 34,
+                        padding: "6px 10px",
+                        fontWeight: 900,
+                        opacity: busy || role !== "teacher" ? 0.55 : 1,
+                        whiteSpace: "nowrap",
+                      }}
+                      title={role !== "teacher" ? "현재 teacher가 아님" : "teacher → student"}
+                    >
+                      {busy ? "처리중…" : "권한 박탈"}
+                    </button>
                   </Td>
                 </tr>
               );
@@ -363,14 +410,7 @@ export default function TeacherTeachers() {
 
             {filtered.length === 0 ? (
               <tr>
-                <td
-                  colSpan={6}
-                  style={{
-                    padding: 18,
-                    textAlign: "center",
-                    color: "var(--text-muted)",
-                  }}
-                >
+                <td colSpan={7} style={{ padding: 18, textAlign: "center", color: "var(--text-muted)" }}>
                   결과가 없습니다.
                 </td>
               </tr>
