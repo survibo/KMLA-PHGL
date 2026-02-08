@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { supabase } from "../../lib/supabase";
 
 const SORTS = {
@@ -17,6 +18,9 @@ export default function TeacherStudents() {
   const [asc, setAsc] = useState(true);
 
   const [updatingId, setUpdatingId] = useState(null);
+
+  // ✅ 전체 승인 진행 상태
+  const [bulkApproving, setBulkApproving] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -67,6 +71,19 @@ export default function TeacherStudents() {
     return list;
   }, [students, search, sortKey, asc]);
 
+  // ✅ 현재 필터 결과 중 "미승인"만
+  const pendingInFiltered = useMemo(() => {
+    return filtered.filter((s) => !s.approved);
+  }, [filtered]);
+
+  // ✅ 캘린더 뷰어 order 쿼리 결정 (학생 관리 정렬 의도를 반영)
+  const calendarOrder = useMemo(() => {
+    // 반 기준으로 보고 있으면 캘린더도 반순 시작
+    if (sortKey === SORTS.CLASS_NO) return "class";
+    // 나머지는 기본 학번순
+    return "student_no";
+  }, [sortKey]);
+
   const toggleApproved = async (student) => {
     if (student.approved) {
       const ok = window.confirm(
@@ -97,6 +114,40 @@ export default function TeacherStudents() {
     }
   };
 
+  // ✅ 전체 승인(필터된 목록 기준, 미승인만)
+  const approveAllFiltered = async () => {
+    if (pendingInFiltered.length === 0) return;
+
+    const ok = window.confirm(
+      `현재 목록에서 대기 중인 ${pendingInFiltered.length}명을 모두 승인할까요?\n(승인만 수행하며, 취소는 하지 않습니다.)`
+    );
+    if (!ok) return;
+
+    const ids = pendingInFiltered.map((s) => s.id);
+
+    try {
+      setBulkApproving(true);
+
+      const { data, error } = await supabase
+        .from("profiles")
+        .update({ approved: true })
+        .in("id", ids)
+        .eq("approved", false)
+        .select("id, name, grade, class_no, student_no, approved, role");
+
+      if (error) throw error;
+
+      const updated = data ?? [];
+      const updatedMap = new Map(updated.map((s) => [s.id, s]));
+
+      setStudents((prev) => prev.map((s) => updatedMap.get(s.id) ?? s));
+    } catch (err) {
+      window.alert(`전체 승인 실패: ${err?.message ?? String(err)}`);
+    } finally {
+      setBulkApproving(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="l-page">
@@ -119,17 +170,42 @@ export default function TeacherStudents() {
     <div className="l-page">
       {/* Header */}
       <div className="u-panel" style={{ padding: 14 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 10,
+            flexWrap: "wrap",
+            alignItems: "flex-start",
+          }}
+        >
           <div>
             <div style={{ fontSize: 18, fontWeight: 900 }}>학생 관리</div>
             <div style={{ marginTop: 4, fontSize: 13, color: "var(--text-muted)" }}>
-              학생 승인 상태를 조회/변경합니다.
+              학생 승인 상태를 조회/변경합니다. (이름 클릭 → 캘린더)
             </div>
           </div>
 
-          <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
-            총 <b style={{ color: "var(--text-1)" }}>{filtered.length}</b>명 / 전체{" "}
-            <b style={{ color: "var(--text-1)" }}>{students.length}</b>명
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end" }}>
+            <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
+              총 <b style={{ color: "var(--text-1)" }}>{filtered.length}</b>명 / 전체{" "}
+              <b style={{ color: "var(--text-1)" }}>{students.length}</b>명
+            </div>
+
+            <button
+              type="button"
+              className="c-ctl c-btn"
+              onClick={approveAllFiltered}
+              disabled={bulkApproving || pendingInFiltered.length === 0 || updatingId != null}
+              title="현재 목록에서 대기 중인 학생을 모두 승인"
+              style={{
+                fontWeight: 900,
+                opacity:
+                  bulkApproving || pendingInFiltered.length === 0 || updatingId != null ? 0.6 : 1,
+              }}
+            >
+              {bulkApproving ? "전체 승인 중..." : `전체 승인 (${pendingInFiltered.length}명)`}
+            </button>
           </div>
         </div>
       </div>
@@ -150,11 +226,7 @@ export default function TeacherStudents() {
           <div className="r-split">
             <div className="f-field">
               <div className="f-label">정렬 기준</div>
-              <select
-                className="c-ctl c-input"
-                value={sortKey}
-                onChange={(e) => setSortKey(e.target.value)}
-              >
+              <select className="c-ctl c-input" value={sortKey} onChange={(e) => setSortKey(e.target.value)}>
                 <option value={SORTS.STUDENT_NO}>학번</option>
                 <option value={SORTS.CLASS_NO}>반</option>
                 <option value={SORTS.APPROVED}>승인 여부</option>
@@ -171,13 +243,15 @@ export default function TeacherStudents() {
 
           <div className="f-hint">
             * 승인 취소는 확인창이 뜹니다. 승인 처리(대기 → 승인)는 즉시 반영됩니다.
+            <br />
+            * 전체 승인은 현재 목록(검색/정렬 반영)에서 <b>대기 중</b> 학생만 승인합니다.
           </div>
         </div>
       </div>
 
       {/* Table */}
       <div className="u-panel" style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 720 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760 }}>
           <thead>
             <tr style={{ background: "var(--bg-2)" }}>
               <Th>이름</Th>
@@ -185,16 +259,19 @@ export default function TeacherStudents() {
               <Th>반</Th>
               <Th>번호</Th>
               <Th>승인</Th>
+              <Th>캘린더</Th>
             </tr>
           </thead>
 
           <tbody>
             {filtered.map((s) => {
-              const busy = updatingId === s.id;
+              const busy = updatingId === s.id || bulkApproving;
 
               const statusText = s.approved ? "승인됨" : "대기";
               const statusColor = s.approved ? "var(--text-1)" : "var(--text-muted)";
-              const action示 = s.approved ? "취소" : "승인";
+              const actionText = s.approved ? "취소" : "승인";
+
+              const calTo = `/teacher/calendar/${s.id}?order=${calendarOrder}`;
 
               return (
                 <tr
@@ -204,7 +281,30 @@ export default function TeacherStudents() {
                     background: "var(--bg-1)",
                   }}
                 >
-                  <Td strong>{s.name ?? "-"}</Td>
+                  {/* ✅ 이름을 링크로 */}
+                  <Td strong>
+                    <Link
+                      to={calTo}
+                      className="c-ctl c-btn"
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 8,
+                        minHeight: 36,
+                        padding: "6px 10px",
+                        fontWeight: 900,
+                        background: "var(--bg-1)",
+                        borderColor: "var(--border-subtle)",
+                      }}
+                      title="캘린더 보기"
+                    >
+                      {s.name ?? "-"}
+                      <span style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 900 }}>
+                        보기 →
+                      </span>
+                    </Link>
+                  </Td>
+
                   <Td>{s.grade ?? "-"}</Td>
                   <Td>{s.class_no ?? "-"}</Td>
                   <Td>{s.student_no ?? "-"}</Td>
@@ -234,9 +334,28 @@ export default function TeacherStudents() {
                           opacity: busy ? 0.6 : 1,
                         }}
                       >
-                        {busy ? "처리중..." : action示}
+                        {updatingId === s.id ? "처리중..." : actionText}
                       </button>
                     </div>
+                  </Td>
+
+                  {/* ✅ 별도 캘린더 버튼도 제공(명확성) */}
+                  <Td>
+                    <Link
+                      to={calTo}
+                      className="c-ctl c-btn"
+                      style={{
+                        minHeight: 40,
+                        padding: "8px 10px",
+                        fontWeight: 900,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                      title="캘린더 보기"
+                    >
+                      캘린더
+                    </Link>
                   </Td>
                 </tr>
               );
@@ -244,7 +363,7 @@ export default function TeacherStudents() {
 
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={5} style={{ padding: 18, textAlign: "center", color: "var(--text-muted)" }}>
+                <td colSpan={6} style={{ padding: 18, textAlign: "center", color: "var(--text-muted)" }}>
                   검색 결과가 없습니다.
                 </td>
               </tr>

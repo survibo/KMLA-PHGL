@@ -32,7 +32,8 @@ export default function TeacherHeader() {
       style={{
         width: "100%",
         borderBottom: "1px solid var(--border-subtle)",
-        background: "var(--bg-1)", padding: "12px"
+        background: "var(--bg-1)",
+        padding: "12px",
       }}
     >
       <div
@@ -58,6 +59,8 @@ export default function TeacherHeader() {
 
       <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
         <Tab to="/teacher/students" label="학생 관리" />
+        {/* ✅ 추가 */}
+        <Tab to="/teacher/calendar/first" label="캘린더" />
         <Tab to="/teacher/profile" label="내 정보" />
       </div>
     </div>

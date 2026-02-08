@@ -8,6 +8,7 @@ import AuthCallback from "./pages/AuthCallback";
 import MyProfile from "./pages/MyProfile";
 import MyProfileEdit from "./pages/MyProfileEdit";
 import TeacherStudents from "./pages/teacher/TeacherStudents";
+import TeacherCalendar from "./pages/teacher/TeacherCalendar";
 
 import ProtectedRoute from "./components/ProtectedRoute";
 import Pending from "./pages/student/Pending";
@@ -103,6 +104,17 @@ export default function App() {
           <ProtectedRoute allowRole="teacher">
             <TeacherLayout>
               <TeacherStudents />
+            </TeacherLayout>
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/teacher/calendar/:studentId"
+        element={
+          <ProtectedRoute allowRole="teacher">
+            <TeacherLayout>
+              <TeacherCalendar />
             </TeacherLayout>
           </ProtectedRoute>
         }
