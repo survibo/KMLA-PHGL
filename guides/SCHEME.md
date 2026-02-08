@@ -1,5 +1,6 @@
 -- =====================================================
 -- FULL RESET + CREATE (ABSENCES STATUS CONTROL + ROLE REVOKE AUDIT)
+-- ✅ Security Advisor: Function Search Path Mutable 해결 버전
 -- 실행: 이 블록 전체를 SQL Editor에 그대로 붙여넣고 실행
 -- =====================================================
 
@@ -49,14 +50,18 @@ end $$;
 
 -- =====================================================
 -- 1. 공통 함수: updated_at 자동 갱신
+-- ✅ SET search_path = public 추가
 -- =====================================================
 create or replace function public.set_updated_at()
-returns trigger as $$
+returns trigger
+language plpgsql
+set search_path = public
+as $$
 begin
   new.updated_at = now();
   return new;
 end;
-$$ language plpgsql;
+$$;
 
 -- =====================================================
 -- 2. profiles
@@ -93,8 +98,12 @@ before update on public.profiles
 for each row execute function public.set_updated_at();
 
 -- ✅ role 변경 자동 기록 트리거
+-- ✅ SET search_path = public 추가
 create or replace function public.audit_profile_role()
-returns trigger as $$
+returns trigger
+language plpgsql
+set search_path = public
+as $$
 begin
   if auth.uid() is null then
     return new;
@@ -107,7 +116,7 @@ begin
 
   return new;
 end;
-$$ language plpgsql;
+$$;
 
 drop trigger if exists trg_audit_profile_role on public.profiles;
 create trigger trg_audit_profile_role
@@ -176,9 +185,14 @@ on public.absences(status_updated_at);
 
 -- =====================================================
 -- 5. auth.users → profiles 자동 생성
+-- ✅ SECURITY DEFINER + SET search_path = public
 -- =====================================================
 create or replace function public.handle_new_user()
-returns trigger as $$
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
 begin
   insert into public.profiles (id, name)
   values (
@@ -189,7 +203,7 @@ begin
 
   return new;
 end;
-$$ language plpgsql security definer;
+$$;
 
 drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
@@ -205,9 +219,15 @@ alter table public.absences enable row level security;
 
 -- =====================================================
 -- 7. helper: 승인된 teacher 여부
+-- ✅ SECURITY DEFINER + SET search_path = public
 -- =====================================================
 create or replace function public.is_teacher()
-returns boolean as $$
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
   select exists (
     select 1
     from public.profiles p
@@ -215,7 +235,7 @@ returns boolean as $$
       and p.role = 'teacher'
       and p.approved = true
   );
-$$ language sql stable security definer;
+$$;
 
 -- =====================================================
 -- 8. PROFILES POLICIES
@@ -246,9 +266,13 @@ with check (
 -- =====================================================
 -- 9. PROFILES SAFETY TRIGGER
 -- role / approved 변경 차단 (학생)
+-- ✅ SET search_path = public 추가
 -- =====================================================
 create or replace function public.block_role_approved_changes()
-returns trigger as $$
+returns trigger
+language plpgsql
+set search_path = public
+as $$
 begin
   if auth.uid() is null then
     return new;
@@ -266,7 +290,7 @@ begin
 
   return new;
 end;
-$$ language plpgsql;
+$$;
 
 drop trigger if exists trg_block_role_approved_changes on public.profiles;
 create trigger trg_block_role_approved_changes
@@ -362,9 +386,13 @@ using (
 -- 11-b. ABSENCES SAFETY TRIGGER
 -- teacher: status만 변경 가능 + status 변경자/시간 자동 기록
 -- student: status 변경 금지 (date/reason 수정은 허용)
+-- ✅ SET search_path = public 추가
 -- =====================================================
 create or replace function public.block_absence_illegal_updates()
-returns trigger as $$
+returns trigger
+language plpgsql
+set search_path = public
+as $$
 begin
   if auth.uid() is null then
     return new;
@@ -401,7 +429,7 @@ begin
 
   return new;
 end;
-$$ language plpgsql;
+$$;
 
 drop trigger if exists trg_block_absence_illegal_updates on public.absences;
 create trigger trg_block_absence_illegal_updates
