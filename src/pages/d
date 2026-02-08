@@ -1,5 +1,5 @@
-PROJECT GUIDE — React + Supabase Student/Teacher Web App
-========================================================
+PROJECT GUIDE — React + Supabase Student/Teacher Web App (v2)
+============================================================
 
 너는 React + Supabase 기반 웹앱을 함께 개발하는 기술 파트너다.
 아래 구조와 전제는 이미 확정·구현된 상태이며,
@@ -14,14 +14,14 @@ PROJECT GUIDE — React + Supabase Student/Teacher Web App
 ==================================================
 
 - 학생
-  - 본인 일정(events) 관리
+  - 주간 학습 일정(events) 관리
   - 결석(absences) 제출
   - 본인 프로필 조회/수정
 
 - 선생님
   - 전체 학생 조회
-  - 학생 결석 확인
   - 학생 승인 관리 (approved 토글)
+  - 학생 결석 확인
   - 본인 프로필 조회/수정
 
 ==================================================
@@ -32,19 +32,54 @@ PROJECT GUIDE — React + Supabase Student/Teacher Web App
 - react-router-dom
 - Supabase (Google OAuth)
 
-- 기본 UI 규칙
-  - 순수 JSX + index.css (class 기반)
-  - CSS 변수 기반 라이트/다크 테마
-  - 원칙적으로 UI 라이브러리 사용 금지
+==================================================
+[UI / 스타일 시스템 (중요, 확정)]
+==================================================
 
-- 예외
-  - 선생님 학생 관리 페이지(TeacherStudents) 1개에 한해
-    Tailwind CSS 사용 허용
-  - 해당 페이지는 데스크톱 전용
+❗ Tailwind CSS 전면 제거
+❗ UI 라이브러리 미사용
+
+- 순수 JSX + 단일 CSS 시스템 사용
+- CSS 변수 기반 라이트 / 다크 테마
+- PWA 대응 (모바일 / 태블릿 / 데스크톱 전부 고려)
+
+### CSS 아키텍처 (확정)
+
+- 레이아웃
+  - l-page : max-width 제한 콘텐츠 영역
+- 컨트롤
+  - c-ctl : 모든 버튼/입력 기본
+  - c-btn : 버튼
+  - c-btn--danger : 위험 액션
+  - c-input : input/select/textarea
+- 유틸
+  - u-panel : section 박스
+  - u-alert / u-alert--error
+- 폼
+  - f-field / f-label / f-hint
+
+기존 className / card / container / button 등은 **전부 폐기**됨.
 
 ==================================================
-[DB 구조 (확정 / 변경 금지)]
+[헤더 구조 (확정)]
 ==================================================
+
+- 학생 전용 Header / 선생 전용 Header 분리
+- Header는 **width 100%**
+- 내부 콘텐츠만 l-page로 폭 제한
+- Layout 구조:
+
+[ Header (full width) ]
+[ main.l-page (페이지 콘텐츠) ]
+
+- Header는 ProtectedRoute 내부에서만 렌더링됨
+- 공개 페이지(login / pending)는 헤더 없음
+
+==================================================
+[DB 구조 (확정)]
+==================================================
+
+❗ DB 구조 변경 완료 (이제 이 상태가 최종)
 
 - profiles
   - id (auth.users FK)
@@ -56,14 +91,21 @@ PROJECT GUIDE — React + Supabase Student/Teacher Web App
 - events
   - id
   - owner_id (profiles.id)
-  - title, description, category
-  - start_at, end_at
+  - date (date, YYYY-MM-DD)
+  - category: text
+    - "기초 역량 강화"
+    - "진로 탐색"
+  - title (필수, 자유 텍스트)
+  - description (선택)
+  - duration_min (int, 소요 시간 분 단위)
   - created_at, updated_at
 
 - absences
   - id
   - student_id (profiles.id)
-  - date, reason, status
+  - date
+  - reason
+  - status
   - created_at, updated_at
 
 - auth.users → profiles 자동 생성 trigger 존재
@@ -71,8 +113,6 @@ PROJECT GUIDE — React + Supabase Student/Teacher Web App
 - RLS 전부 활성화
 - is_teacher() helper function 존재
 - role / approved 변경 차단 trigger 존재
-
-※ DB 구조, 정책, 트리거 변경 제안 절대 금지
 
 ==================================================
 [RLS / 권한 규칙 (확정)]
@@ -102,43 +142,44 @@ PROJECT GUIDE — React + Supabase Student/Teacher Web App
 
 - 핵심 훅: useMyProfile()
 
-  동작:
-  1) supabase.auth.getSession()으로 session 복구
-  2) profiles에서
-     id, role, approved, name, grade, class_no, student_no
-     조회
+### useMyProfile 동작
 
-  추가 구현됨:
-  - profile.grade가 null/undefined일 때만
-    현재 연도 + 5 값을 자동으로 profiles.grade에 update
-  - update 성공 시 훅의 profile state도 동기화
-  - role / approved는 update payload에 절대 포함하지 않음
+1) supabase.auth.getSession()으로 session 복구
+2) profiles에서
+   id, role, approved, name, grade, class_no, student_no 조회
+3) 승인/role은 절대 update payload에 포함하지 않음
 
-- 접근 규칙
-  - 로그인 X → /login
-  - 로그인 O + approved=false → /pending
-  - approved=true:
-    - student → /student/*
-    - teacher → /teacher/*
+### 추가로 구현된 중요한 동작
+
+- auth state change 시 profile 재조회
+- 앱 포커스 복귀 / 탭 활성화 시 profile 재조회
+- approved 상태가 DB에서 바뀌면 다음 포커스 시 즉시 반영됨
+- stale profile 문제 해결됨
+
+useMyProfile는 다음을 반환함:
+- loading
+- session
+- profile
+- refreshProfile()
+- refreshProfileSilent()
 
 ==================================================
 [ProtectedRoute 규칙 (확정)]
 ==================================================
 
-- ProtectedRoute({ allowRole, children })
+ProtectedRoute({ allowRole, children })
 
-  처리 순서:
-  - loading → Loading 표시
-  - !session → /login
-  - !profile → /login (DB 문제)
-  - !approved → /pending
-  - allowRole 불일치:
-    - teacher면 /teacher
-    - student면 /student/calendar
+처리 순서:
+1) loading → Loading
+2) !session → /login
+3) !profile → /login
+4) !profile.approved → /pending
+5) allowRole 불일치:
+   - teacher → /teacher
+   - student → /student/calendar
 
-- 페이지 내부 컴포넌트(버튼 등)는
-  별도 권한 조건 체크 최소화
-  (ProtectedRoute가 보장)
+❗ ProtectedRoute는 승인 판단만 담당
+❗ 승인 상태 최신화 책임은 useMyProfile
 
 ==================================================
 [라우팅 구조 (확정)]
@@ -153,84 +194,43 @@ PROJECT GUIDE — React + Supabase Student/Teacher Web App
 /student/profile
 /student/profile/edit
 
-/teacher
+/teacher                → TeacherStudents로 리다이렉트
+/teacher/students
 /teacher/profile
 /teacher/profile/edit
-/teacher/students
 
-그 외 → 404 → 메인으로 이동 버튼 제공
+그 외 → 404 → 메인 이동 버튼 제공
 
 ==================================================
-[구현된 프론트 페이지 / 기능 상태]
+[구현 완료 페이지]
 ==================================================
 
-1) MyProfile
-- 학생/선생 공용
-- role에 따라 edit 경로 분기
-- 정보 수정 버튼 존재
-- 학생 페이지에서 StudentGoCalendar 버튼 사용
+1) StudentCalendar
+- 주간 캘린더 (월~일)
+- 하루 선택 후 일정 추가 (modal)
+- category 2종
+- 시간 입력 → duration_min 저장
+- 주간 합계 (카테고리별 총 시간) 표시
+- 모바일/태블릿 한 화면 UX 고려
 
-2) MyProfileEdit
-- name, grade, class_no, student_no 수정
-- validation 존재
-- role/approved update 금지
-- 저장 성공 시 role에 맞는 profile 페이지로 이동
-- class 기반 CSS 사용
-- label / hint / error 계층 정리됨
-
-3) StudentGoCalendar
-- /student/calendar 이동 버튼 컴포넌트
-- 내부 권한 체크 없음 (ProtectedRoute가 보장)
-
-4) TeacherStudents (학생 관리)
-- profiles.role='student' 전체 조회
-- 표시 컬럼:
-  이름 / 기수 / 반 / 학번 / 승인 여부
-- 기능:
-  - 이름 검색
-  - 정렬: 학번 / 반 / 승인 여부 (오름·내림)
-  - 승인 토글:
-    - 대기 → 승인: 즉시 처리
-    - 승인됨 → 취소: confirm 후 처리
+2) TeacherStudents
+- 학생 전체 조회
+- 이름 검색
+- 정렬 (학번 / 반 / 승인 여부)
+- 승인 토글
+  - 승인 → 즉시
+  - 취소 → confirm
 - row별 updating 상태 표시
-- Tailwind CSS 사용 (이 페이지 한정)
+- Tailwind 제거, 단일 CSS 시스템 적용
 
-==================================================
-[CSS / 스타일 가이드 (확정)]
-==================================================
+3) MyProfile / MyProfileEdit
+- 학생/선생 공용
+- role 기반 edit 경로 분기
+- validation 포함
 
-- CSS 변수 (라이트/다크)
-  --bg-1, --bg-2, --bg-hover, --bg-hover-strong
-  --border-subtle, --border-focus
-  --text-1, --text-2, --text-muted
-  --accent-danger, --accent-danger-bg
-
-- 공용 클래스 규칙
-  - .button / .input : 공용 컨트롤
-  - .card : border가 필요한 surface (기본 중앙정렬)
-  - .container : 묶음용 (스타일 거의 없음)
-
-- /edit 화면용 최소 클래스
-  - .profile-form, .field, .label
-  - .grid-3, .hint
-  - .alert, .alert--error
-
-- CSS는 반드시 Vite 엔트리에서 로드
-  - main.jsx에서 index.css 또는 global.css import
-
-==================================================
-[진행 계획]
-==================================================
-
-- 다음 구현 대상:
-  /student/calendar
-
-  단계:
-  1) 이번 주 일정 리스트 기반 events CRUD 검증
-  2) 이후 주간 캘린더 그리드 UI로 확장
-
-- 헤더 / 네비게이션 통합은
-  기능 페이지가 더 늘어난 뒤 진행 예정
+4) Header / Layout
+- 학생/선생 전용 헤더 분리
+- full-width header + 중앙 콘텐츠 구조
 
 ==================================================
 [절대 금지 사항]
@@ -238,12 +238,14 @@ PROJECT GUIDE — React + Supabase Student/Teacher Web App
 
 - Auth / RLS / 승인 흐름 변경 제안
 - DB 구조 / 정책 / 트리거 변경 제안
-- 라우팅 구조 갈아엎기
-- 전역 UI 라이브러리 도입
+- ProtectedRoute 로직 우회
+- Tailwind / UI 라이브러리 재도입
+- 기존 CSS 시스템과 다른 스타일 도입
 - 설명 순서 무시 (항상 이유 → 코드)
 
 ==================================================
 
-만약에 기존 코드, 혹은 DB 스키마가 필요하면 요청하기기
+이 문서는 "현재 구현된 상태"의 단일 진실 원본이다.
+다음 작업은 이 문서를 전제로 진행한다.
 
 END OF GUIDE
