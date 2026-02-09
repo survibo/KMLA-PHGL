@@ -62,7 +62,7 @@ export default function TeacherHeader() {
             onClick={toggleTheme}
             title="테마 전환"
           >
-            {theme === "dark" ? "라이트" : "다크"}
+            {theme === "dark" ? "라이트" : "다크(테스트)"}
           </button>
 
           <button
@@ -77,12 +77,14 @@ export default function TeacherHeader() {
       </div>
 
       <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-        <Tab to="/teacher/students" label="학생 관리" />
-        <Tab to="/teacher/absences" label="결석" />
-        <Tab to="/teacher/calendar/first" label="캘린더" />
-        <Tab to="/teacher/profile" label="내 정보" />
-                <Tab to="/teacher/teachers" label="선생님 목록" />
+                <Tab to="/teacher/students" label="학생 관리" />
 
+        <Tab to="/teacher/calendar/first" label="캘린더" />
+        <Tab to="/teacher/absences" label="결석" />
+                <Tab to="/teacher/weeklyaudit" label="주간 비교" />
+
+        <Tab to="/teacher/profile" label="내 정보" />
+        <Tab to="/teacher/teachers" label="선생님 목록" />
       </div>
     </div>
   );

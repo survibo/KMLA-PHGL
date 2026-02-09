@@ -10,7 +10,7 @@
 ------------------------- */
 :root {
   --bg-1: #ffffff;
-  --bg-2: #f5f5f5;
+  --bg-2: #f3f3f3;
   --bg-3: #ededed;
   --bg-hover: #eeeeee;
   --bg-hover-strong: #dbdbdb;
@@ -49,9 +49,9 @@
 }
 
 [data-theme="dark"] {
-  --bg-1: #121417;
-  --bg-2: #171a1f;
-  --bg-3: #1d2128;
+  --bg-1: #1e2125;
+  --bg-2: #36393f;
+  --bg-3: #5e636b;
   --bg-hover: #242a33;
   --bg-hover-strong: #2b3340;
 

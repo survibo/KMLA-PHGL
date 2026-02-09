@@ -12,15 +12,29 @@ import {
 const CATEGORIES = ["기초 역량 강화", "진로 탐색"];
 const DOW = ["월", "화", "수", "목", "금", "토", "일"];
 
-function minutesToHoursText(min) {
-  const h = min / 60;
-  return Number.isInteger(h) ? `${h}시간` : `${h.toFixed(1)}시간`;
+// 개별 항목 표시: 1시간 n분 (정확)
+function minutesToHMText(min) {
+  const m = Number(min) || 0;
+  const h = Math.floor(m / 60);
+  const r = m % 60;
+
+  if (h <= 0) return `${r}분`;
+  if (r === 0) return `${h}시간`;
+  return `${h}시간 ${r}분`;
 }
 
-function hoursToMinutes(hoursStr) {
-  const n = Number(hoursStr);
-  if (!Number.isFinite(n) || n <= 0) return null;
-  return Math.round(n * 60);
+// 요약(최종 결과) 표시: 소수 1자리 시간 + 불필요한 .0 제거
+function minutesToHoursDecimalText1(min) {
+  const m = Number(min) || 0;
+  const h = m / 60;
+  const s = h.toFixed(1);
+  return `${s.replace(/\.0$/, "")}시간`;
+}
+
+// 입력: 분 문자열 -> 자연수(1 이상의 정수)만 허용
+function parseMinutes(minutesStr) {
+  if (!/^[1-9]\d*$/.test(minutesStr)) return null;
+  return Number(minutesStr);
 }
 
 function Modal({ open, title, onClose, children }) {
@@ -53,6 +67,19 @@ export default function StudentCalendar() {
     [monday]
   );
 
+  // ===== 이동 제한: 오늘 기준 ±3주 =====
+  const thisMonday = useMemo(() => startOfWeekMonday(new Date()), []);
+  const minMonday = useMemo(() => addDays(thisMonday, -7), [thisMonday]); // -1주
+  const maxMonday = useMemo(() => addDays(thisMonday, 21), [thisMonday]);  // +3주
+
+  const canPrev = monday.getTime() > minMonday.getTime();
+  const canNext = monday.getTime() < maxMonday.getTime();
+
+  // "이번 주"인지 판단: 현재 monday가 오늘 기준 이번주 월요일과 같으면 true
+  const isThisWeek = useMemo(() => {
+    return toISODate(monday) === toISODate(thisMonday);
+  }, [monday, thisMonday]);
+
   const [selectedIdx, setSelectedIdx] = useState(() => {
     const today = new Date();
     const wMon = startOfWeekMonday(today);
@@ -80,7 +107,7 @@ export default function StudentCalendar() {
     category: CATEGORIES[0],
     title: "",
     description: "",
-    hours: "1",
+    minutes: "60",
   });
 
   const weekStartISO = toISODate(monday);
@@ -93,7 +120,9 @@ export default function StudentCalendar() {
 
     const { data, error } = await supabase
       .from("events")
-      .select("id, owner_id, title, description, category, date, duration_min, created_at")
+      .select(
+        "id, owner_id, title, description, category, date, duration_min, created_at"
+      )
       .eq("owner_id", uid)
       .gte("date", weekStartISO)
       .lte("date", weekEndISO)
@@ -130,7 +159,8 @@ export default function StudentCalendar() {
   const totals = useMemo(() => {
     const base = { "기초 역량 강화": 0, "진로 탐색": 0 };
     for (const ev of events) {
-      if (base[ev.category] !== undefined) base[ev.category] += ev.duration_min || 0;
+      if (base[ev.category] !== undefined)
+        base[ev.category] += ev.duration_min || 0;
     }
     return base;
   }, [events]);
@@ -145,7 +175,7 @@ export default function StudentCalendar() {
       category: CATEGORIES[0],
       title: "",
       description: "",
-      hours: "1",
+      minutes: "60",
     });
     setAddOpen(true);
   }
@@ -162,9 +192,9 @@ export default function StudentCalendar() {
       return;
     }
 
-    const minutes = hoursToMinutes(draft.hours);
+    const minutes = parseMinutes(draft.minutes);
     if (!minutes) {
-      setError("시간(hours)은 0보다 큰 숫자여야 함");
+      setError("시간(분)은 1 이상의 자연수여야 함");
       return;
     }
 
@@ -220,17 +250,43 @@ export default function StudentCalendar() {
       {/* Header */}
       <div className="u-panel" style={{ padding: 14 }}>
         <div className="l-section" style={{ gap: 6 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 10,
+              flexWrap: "wrap",
+            }}
+          >
             <div>
               <div style={{ fontSize: 18, fontWeight: 900 }}>주간 학습</div>
-              <div style={{ fontSize: 13, color: "var(--text-muted)" }}>{formatWeekRange(monday)}</div>
+
+              {/* ✅ 이번 주면 연한 초록색 강조 */}
+              <div
+                style={{
+                  fontSize: 13,
+                  fontWeight: isThisWeek ? 900 : 400,
+                  color: isThisWeek ? "#166534" : "var(--text-muted)",
+                  background: isThisWeek ? "rgba(34, 197, 94, 0.12)" : "transparent",
+                  display: "inline-block",
+                  padding: isThisWeek ? "2px 8px" : 0,
+                  borderRadius: isThisWeek ? 999 : 0,
+                }}
+              >
+                {formatWeekRange(monday)}
+                {isThisWeek ? " (이번 주)" : ""}
+              </div>
             </div>
 
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <button
                 className="c-ctl c-btn"
                 type="button"
-                onClick={() => setWeekBase(addDays(monday, -7))}
+                onClick={() => {
+                  if (!canPrev) return;
+                  setWeekBase(addDays(monday, -7));
+                }}
+                disabled={!canPrev}
               >
                 이전 주
               </button>
@@ -244,21 +300,25 @@ export default function StudentCalendar() {
               <button
                 className="c-ctl c-btn"
                 type="button"
-                onClick={() => setWeekBase(addDays(monday, 7))}
+                onClick={() => {
+                  if (!canNext) return;
+                  setWeekBase(addDays(monday, 7));
+                }}
+                disabled={!canNext}
               >
                 다음 주
               </button>
             </div>
           </div>
 
-          {/* Summary */}
+          {/* Summary (최종 결과만 소수 1자리 시간) */}
           <div className="r-split" style={{ marginTop: 10 }}>
             <div className="u-panel" style={{ padding: 12, background: "var(--bg-2)" }}>
               <div style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 800 }}>
                 기초 역량 강화
               </div>
               <div style={{ fontSize: 18, fontWeight: 900, marginTop: 4 }}>
-                {minutesToHoursText(totals["기초 역량 강화"])}
+                {minutesToHoursDecimalText1(totals["기초 역량 강화"])}
               </div>
             </div>
 
@@ -267,7 +327,7 @@ export default function StudentCalendar() {
                 진로 탐색
               </div>
               <div style={{ fontSize: 18, fontWeight: 900, marginTop: 4 }}>
-                {minutesToHoursText(totals["진로 탐색"])}
+                {minutesToHoursDecimalText1(totals["진로 탐색"])}
               </div>
             </div>
           </div>
@@ -277,7 +337,7 @@ export default function StudentCalendar() {
       {/* Error */}
       {error ? <div className="u-alert u-alert--error">{error}</div> : null}
 
-      {/* Day tabs (horizontal scroll, touch-friendly) */}
+      {/* Day tabs */}
       <div
         className="u-panel"
         style={{
@@ -361,8 +421,9 @@ export default function StudentCalendar() {
                         >
                           {ev.category}
                         </span>
+
                         <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                          {minutesToHoursText(ev.duration_min)}
+                          {minutesToHMText(ev.duration_min)}
                         </span>
                       </div>
 
@@ -421,23 +482,25 @@ export default function StudentCalendar() {
               placeholder="학습 내용"
               autoFocus
             />
-            <div className="f-hint">텍스트 자유 입력</div>
           </div>
 
           <div className="f-field">
-            <div className="f-label">시간(시간)</div>
+            <div className="f-label">시간(분)</div>
             <input
               className="c-ctl c-input"
-              value={draft.hours}
-              onChange={(e) => setDraft((p) => ({ ...p, hours: e.target.value }))}
-              placeholder="1"
-              inputMode="decimal"
+              type="number"
+              min={1}
+              step={1}
+              inputMode="numeric"
+              value={draft.minutes}
+              onChange={(e) => setDraft((p) => ({ ...p, minutes: e.target.value }))}
+              placeholder="60"
             />
-            <div className="f-hint">예: 1, 1.5</div>
+            <div className="f-hint">예시: 30, 60</div>
           </div>
 
           <div className="f-field">
-            <div className="f-label">설명(선택)</div>
+            <div className="f-label">설명</div>
             <textarea
               className="c-ctl c-textarea"
               value={draft.description}
@@ -448,12 +511,7 @@ export default function StudentCalendar() {
           </div>
 
           <div className="m-footer" style={{ padding: 0 }}>
-            <button
-              className="c-ctl c-btn"
-              type="button"
-              onClick={() => setAddOpen(false)}
-              disabled={saving}
-            >
+            <button className="c-ctl c-btn" type="button" onClick={() => setAddOpen(false)} disabled={saving}>
               취소
             </button>
             <button className="c-ctl c-btn" type="button" onClick={addEvent} disabled={saving}>

@@ -34,7 +34,6 @@ export default function StudentAbsence() {
       .from("absences")
       .select("id, student_id, date, reason, status, created_at")
       .eq("student_id", uid)
-      .order("date", { ascending: false })
       .order("created_at", { ascending: false });
 
     if (error) {
@@ -143,7 +142,7 @@ export default function StudentAbsence() {
               * 제출 후 상태(대기/승인/거절)는 목록에서 확인
             </div>
             <div className="f-hint" style={{color:"var(--accent-danger)"}}>
-              * 수정이 불가능 하니, 신중하게 작성하세요.
+              * 수정 및 삭제가 불가능 하니, 신중하게 작성하세요.
             </div>
           </div>
 

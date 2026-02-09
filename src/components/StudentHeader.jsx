@@ -70,15 +70,7 @@ export default function StudentHeader() {
               title="테마 전환"
               style={{ fontWeight: 900 }}
             >
-              {theme === "dark" ? "라이트" : "다크"}
-            </button>
-
-            <button
-              className="c-ctl c-btn"
-              type="button"
-              onClick={() => navigate("/student/calendar")}
-            >
-              이번 주
+              {theme === "dark" ? "라이트" : "다크(테스트)"}
             </button>
 
             <button

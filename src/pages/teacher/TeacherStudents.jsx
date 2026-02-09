@@ -432,7 +432,8 @@ export default function TeacherStudents() {
                           opacity: busy ? 0.6 : 1,
 
                           // ✅ CSS 파일 안 건드리고 '악센트' 느낌만 inline로 줌
-                          borderColor: "var(--border-focus)",
+                          borderColor: "var(--accent-danger)",
+                          color:"var(--accent-danger)",
                           background: "var(--bg-2)",
                         }}
                       >

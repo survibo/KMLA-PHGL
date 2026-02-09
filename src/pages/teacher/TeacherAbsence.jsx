@@ -100,7 +100,22 @@ export default function TeacherAbsences() {
     load();
   }, []);
 
-  async function setStatusForAbsence(absenceId, nextStatus) {
+  // ✅ 상태 변경 + 확인창(학생 이름 포함)
+  async function setStatusForAbsence(absenceId, studentName, nextStatus) {
+    const name = studentName ?? "해당 학생";
+
+    const actionText =
+      nextStatus === "approved"
+        ? "승인"
+        : nextStatus === "rejected"
+        ? "거절"
+        : "대기";
+
+    const ok = window.confirm(
+      `${name} 학생의 결석 처리를 "${actionText}"로 하시겠습니까?`
+    );
+    if (!ok) return;
+
     try {
       setUpdatingId(absenceId);
 
@@ -111,10 +126,6 @@ export default function TeacherAbsences() {
 
       if (error) throw error;
 
-      // ✅ 로컬 즉시 반영: status + "처리자"는 auth에서 직접 못가져오니,
-      // 여기서는 상태만 바꾸고, 처리자/시간은 서버 트리거로 들어가므로
-      // 정확히 보려면 새로고침(load) or 아래처럼 optimistic 업데이트 가능.
-      // (가장 정확: load() 한번 더)
       await load();
     } catch (err) {
       window.alert(`상태 변경 실패: ${err?.message ?? String(err)}`);
@@ -266,7 +277,7 @@ export default function TeacherAbsences() {
             </button>
           </div>
 
-          <div className="f-hint">* 처리 버튼은 상태만 변경합니다. (되돌리기 = 대기로 변경)</div>
+          <div className="f-hint">* 요청 제거, 수정은 불가능합니다</div>
         </div>
       </div>
 
@@ -278,15 +289,14 @@ export default function TeacherAbsences() {
             tableLayout: "fixed",
           }}
         >
-          {/* ✅ "마지막 처리자" 컬럼 추가 */}
           <colgroup>
-            <col style={{ width: "12%" }} /> {/* 학생 */}
+            <col style={{ width: "14%" }} /> {/* 학생 */}
             <col style={{ width: "5%" }} />  {/* 반 */}
-            <col style={{ width: "11%" }} />  {/* 번호 */}
-            <col style={{ width: "13%" }} /> {/* 날짜 */}
-            <col style={{ width: "17%" }} /> {/* 요청일 */}
+            <col style={{ width: "10%" }} />  {/* 번호 */}
+            <col style={{ width: "12%" }} /> {/* 날짜 */}
+            <col style={{ width: "15%" }} /> {/* 요청일 */}
             <col style={{ width: "9%" }} /> {/* 상태 */}
-            <col style={{ width: "10%" }} /> {/* 마지막 처리자 */}
+            <col style={{ width: "12%" }} /> {/* 마지막 처리자 */}
             <col style={{ width: "23%" }} /> {/* 처리 */}
           </colgroup>
 
@@ -316,7 +326,10 @@ export default function TeacherAbsences() {
                 <>
                   <tr key={r.id} style={{ borderTop: `1px solid var(--border-subtle)` }}>
                     <Td strong>
-                      <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.student?.name ?? ""}>
+                      <div
+                        style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                        title={r.student?.name ?? ""}
+                      >
                         {r.student?.name ?? "(알 수 없음)"}
                       </div>
                     </Td>
@@ -355,7 +368,6 @@ export default function TeacherAbsences() {
                       </span>
                     </Td>
 
-                    {/* ✅ 마지막 처리자 */}
                     <Td>
                       <div
                         style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
@@ -374,7 +386,7 @@ export default function TeacherAbsences() {
                           label="승인"
                           active={r.status === "approved"}
                           disabled={busy || r.status === "approved"}
-                          onClick={() => setStatusForAbsence(r.id, "approved")}
+                          onClick={() => setStatusForAbsence(r.id, r.student?.name, "approved")}
                         />
 
                         <ActionBtn
@@ -382,15 +394,15 @@ export default function TeacherAbsences() {
                           danger
                           active={r.status === "rejected"}
                           disabled={busy || r.status === "rejected"}
-                          onClick={() => setStatusForAbsence(r.id, "rejected")}
+                          onClick={() => setStatusForAbsence(r.id, r.student?.name, "rejected")}
                         />
 
                         <ActionBtn
-                          label="대기로"
+                          label="대기"
                           muted
                           active={r.status === "pending"}
                           disabled={busy || r.status === "pending"}
-                          onClick={() => setStatusForAbsence(r.id, "pending")}
+                          onClick={() => setStatusForAbsence(r.id, r.student?.name, "pending")}
                         />
                       </div>
 

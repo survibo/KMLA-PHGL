@@ -294,13 +294,13 @@ export default function TeacherTeachers() {
       <div className="u-panel" style={{ overflowX: "hidden" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
           <colgroup>
-            <col style={{ width: "16%" }} /> {/* 이름 */}
+            <col style={{ width: "14%" }} /> {/* 이름 */}
             <col style={{ width: "10%" }} /> {/* 승인 */}
             <col style={{ width: "14%" }} /> {/* 현재 ROLE */}
             <col style={{ width: "18%" }} /> {/* 권한 박탈/변경자 */}
             <col style={{ width: "16%" }} /> {/* 권한 박탈/변경일 */}
             <col style={{ width: "16%" }} /> {/* ID */}
-            <col style={{ width: "10%" }} /> {/* 액션 */}
+            <col style={{ width: "12%" }} /> {/* 액션 */}
           </colgroup>
 
           <thead>

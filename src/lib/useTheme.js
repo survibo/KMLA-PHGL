@@ -10,13 +10,10 @@ function getInitialTheme() {
   const saved = localStorage.getItem(KEY);
   if (saved === "dark" || saved === "light") return saved;
 
-  // 저장값 없으면 시스템 설정 따라감
-  const prefersDark =
-    window.matchMedia &&
-    window.matchMedia("(prefers-color-scheme: dark)").matches;
-
-  return prefersDark ? "dark" : "light";
+  // 저장값 없으면 항상 light
+  return "light";
 }
+
 
 export function useTheme() {
   const [theme, setTheme] = useState("light");
