@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 const KEY = "phgl_theme"; // "dark" | "light"
 
@@ -14,15 +14,12 @@ function getInitialTheme() {
   return "light";
 }
 
-
 export function useTheme() {
-  const [theme, setTheme] = useState("light");
-
-  useEffect(() => {
+  const [theme, setTheme] = useState(() => {
     const t = getInitialTheme();
-    setTheme(t);
     applyTheme(t);
-  }, []);
+    return t;
+  });
 
   function toggleTheme() {
     setTheme((prev) => {

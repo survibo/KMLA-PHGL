@@ -1,5 +1,5 @@
-import { useMemo, useRef, useState } from "react";
-import { NavLink, useNavigate } from "react-router-dom";
+import { useRef, useState } from "react";
+import { NavLink } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { useMyProfile } from "../hooks/useMyProfile";
 import { useTheme } from "../lib/useTheme";
@@ -25,7 +25,6 @@ function Tab({ to, label }) {
 }
 
 export default function StudentHeader() {
-  const navigate = useNavigate();
   const { profile, loading } = useMyProfile();
   const { theme, toggleTheme } = useTheme();
 
@@ -43,7 +42,7 @@ export default function StudentHeader() {
 
   const EGG_MESSAGES = [
     "눈 안 아프시나요…? ( •_•)",
-    "\ 화려한 조명이 날 감싸네 /",
+    "/ 화려한 조명이 날 감싸네 /",
     "* 깜 빡 깜 빡 *",
     "30 과학기술부가 만든 웹페이지 입니다!",
     "꽝!",
