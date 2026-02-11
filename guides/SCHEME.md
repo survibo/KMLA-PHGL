@@ -1,9 +1,12 @@
+/* eslint-disable */
+
 -- =====================================================
 -- FULL RESET + CREATE
 -- (ABSENCES STATUS CONTROL + ROLE REVOKE AUDIT)
 -- + ✅ GLOBAL AUDIT LOG (INSERT/UPDATE/DELETE 전부 기록)
 -- + ✅ "사고 대비용": 앱(학생/선생)에서 audit_log 조회/수정 불가
 -- + ✅ Security Advisor: Function Search Path Mutable 해결 (모든 함수 set search_path = public)
+-- + ✅ FIX: 학생/비승인 사용자가 처리자 컬럼(role_updated_*, status_updated_*) 위조 못하게 차단
 -- 실행: 이 블록 전체를 SQL Editor에 그대로 붙여넣고 실행
 -- =====================================================
 
@@ -166,7 +169,6 @@ declare
   trg_name text;
 begin
   foreach t in array table_names loop
-    -- audit_log 같은건 애초에 넣지 마라
     trg_name := format('trg_audit_%s', t);
 
     execute format('drop trigger if exists %I on public.%I', trg_name, t);
@@ -184,7 +186,6 @@ $$;
 -- ✅ audit_log는 앱에서 접근 불가 (권한 + RLS)
 alter table public.audit_log enable row level security;
 
--- 정책을 "명시적 deny"로 박아둠 (select/insert/update/delete 모두 차단)
 drop policy if exists audit_log_deny_all on public.audit_log;
 create policy audit_log_deny_all
 on public.audit_log
@@ -192,7 +193,6 @@ for all
 using (false)
 with check (false);
 
--- 권한도 전부 회수(추가 안전장치)
 revoke all on table public.audit_log from anon;
 revoke all on table public.audit_log from authenticated;
 revoke all on table public.audit_log from public;
@@ -244,7 +244,7 @@ create trigger trg_profiles_updated_at
 before update on public.profiles
 for each row execute function public.set_updated_at();
 
--- role 변경 자동 기록
+-- role 변경 자동 기록 (teacher가 role을 바꿀 때만 세팅)
 create or replace function public.audit_profile_role()
 returns trigger
 language plpgsql
@@ -405,7 +405,9 @@ with check (
 );
 
 -- =====================================================
--- 9) PROFILES SAFETY TRIGGER (학생이 role/approved 변경 못함)
+-- 9) PROFILES SAFETY TRIGGER
+-- - 학생이 role/approved 변경 못함
+-- - ✅ FIX: 학생이 role_updated_by/at 위조 못함
 -- =====================================================
 create or replace function public.block_role_approved_changes()
 returns trigger
@@ -424,6 +426,15 @@ begin
 
     if new.approved is distinct from old.approved then
       raise exception 'approved cannot be changed';
+    end if;
+
+    -- ✅ 위조 방지
+    if new.role_updated_by is distinct from old.role_updated_by then
+      raise exception 'role_updated_by cannot be changed';
+    end if;
+
+    if new.role_updated_at is distinct from old.role_updated_at then
+      raise exception 'role_updated_at cannot be changed';
     end if;
   end if;
 
@@ -509,18 +520,11 @@ with check (
   or public.is_teacher()
 );
 
-drop policy if exists absences_delete_own on public.absences;
-create policy absences_delete_own
-on public.absences
-for delete
-using (
-  student_id = auth.uid()
-);
-
 -- =====================================================
 -- 11-b) ABSENCES SAFETY TRIGGER
 -- teacher: status만 변경 가능 + status 변경자/시간 자동 기록
 -- student: status 변경 금지 (date/reason 수정은 허용)
+-- ✅ FIX: student가 status_updated_* 위조 못함
 -- =====================================================
 create or replace function public.block_absence_illegal_updates()
 returns trigger
@@ -535,6 +539,15 @@ begin
   if new.status is distinct from old.status then
     new.status_updated_by := auth.uid();
     new.status_updated_at := now();
+  else
+    -- ✅ 위조 방지: status가 안 바뀌면 처리자/시간도 바꾸면 안됨
+    if new.status_updated_by is distinct from old.status_updated_by then
+      raise exception 'status_updated_by cannot be changed';
+    end if;
+
+    if new.status_updated_at is distinct from old.status_updated_at then
+      raise exception 'status_updated_at cannot be changed';
+    end if;
   end if;
 
   if public.is_teacher() then

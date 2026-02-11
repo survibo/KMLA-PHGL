@@ -1,3 +1,6 @@
+/* eslint-disable */
+
+
 Test 하려면 Oauth 해둬야함
 https://www.youtube.com/watch?v=sB6bPOvvlgw
 

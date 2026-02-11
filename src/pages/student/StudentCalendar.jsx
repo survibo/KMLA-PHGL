@@ -70,7 +70,7 @@ export default function StudentCalendar() {
   // ===== 이동 제한: 오늘 기준 ±3주 =====
   const thisMonday = useMemo(() => startOfWeekMonday(new Date()), []);
   const minMonday = useMemo(() => addDays(thisMonday, -7), [thisMonday]); // -1주
-  const maxMonday = useMemo(() => addDays(thisMonday, 21), [thisMonday]);  // +3주
+  const maxMonday = useMemo(() => addDays(thisMonday, 21), [thisMonday]); // +3주
 
   const canPrev = monday.getTime() > minMonday.getTime();
   const canNext = monday.getTime() < maxMonday.getTime();
@@ -88,10 +88,6 @@ export default function StudentCalendar() {
       Math.min(6, Math.floor((today - wMon) / (1000 * 60 * 60 * 24)))
     );
   });
-
-  useEffect(() => {
-    setSelectedIdx(0);
-  }, [toISODate(monday)]);
 
   const selectedDate = weekDays[selectedIdx];
   const selectedISO = toISODate(selectedDate);
@@ -141,8 +137,8 @@ export default function StudentCalendar() {
   }
 
   useEffect(() => {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
     if (!loading && uid) fetchWeek();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, uid, weekStartISO, weekEndISO]);
 
   const eventsByDate = useMemo(() => {
@@ -267,7 +263,9 @@ export default function StudentCalendar() {
                   fontSize: 13,
                   fontWeight: isThisWeek ? 900 : 400,
                   color: isThisWeek ? "#166534" : "var(--text-muted)",
-                  background: isThisWeek ? "rgba(34, 197, 94, 0.12)" : "transparent",
+                  background: isThisWeek
+                    ? "rgba(34, 197, 94, 0.12)"
+                    : "transparent",
                   display: "inline-block",
                   padding: isThisWeek ? "2px 8px" : 0,
                   borderRadius: isThisWeek ? 999 : 0,
@@ -284,6 +282,8 @@ export default function StudentCalendar() {
                 type="button"
                 onClick={() => {
                   if (!canPrev) return;
+                  setSelectedIdx(0);
+
                   setWeekBase(addDays(monday, -7));
                 }}
                 disabled={!canPrev}
@@ -293,7 +293,10 @@ export default function StudentCalendar() {
               <button
                 className="c-ctl c-btn"
                 type="button"
-                onClick={() => setWeekBase(startOfWeekMonday(new Date()))}
+                onClick={() => {
+                  setSelectedIdx(0);
+                  setWeekBase(startOfWeekMonday(new Date()));
+                }}
               >
                 이번 주
               </button>
@@ -302,6 +305,7 @@ export default function StudentCalendar() {
                 type="button"
                 onClick={() => {
                   if (!canNext) return;
+                  setSelectedIdx(0);
                   setWeekBase(addDays(monday, 7));
                 }}
                 disabled={!canNext}
@@ -313,8 +317,17 @@ export default function StudentCalendar() {
 
           {/* Summary (최종 결과만 소수 1자리 시간) */}
           <div className="r-split" style={{ marginTop: 10 }}>
-            <div className="u-panel" style={{ padding: 12, background: "var(--bg-2)" }}>
-              <div style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 800 }}>
+            <div
+              className="u-panel"
+              style={{ padding: 12, background: "var(--bg-2)" }}
+            >
+              <div
+                style={{
+                  fontSize: 12,
+                  color: "var(--text-muted)",
+                  fontWeight: 800,
+                }}
+              >
                 기초 역량 강화
               </div>
               <div style={{ fontSize: 18, fontWeight: 900, marginTop: 4 }}>
@@ -322,8 +335,17 @@ export default function StudentCalendar() {
               </div>
             </div>
 
-            <div className="u-panel" style={{ padding: 12, background: "var(--bg-2)" }}>
-              <div style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 800 }}>
+            <div
+              className="u-panel"
+              style={{ padding: 12, background: "var(--bg-2)" }}
+            >
+              <div
+                style={{
+                  fontSize: 12,
+                  color: "var(--text-muted)",
+                  fontWeight: 800,
+                }}
+              >
                 진로 탐색
               </div>
               <div style={{ fontSize: 18, fontWeight: 900, marginTop: 4 }}>
@@ -366,14 +388,33 @@ export default function StudentCalendar() {
               style={{
                 minWidth: 92,
                 background: active ? "var(--bg-2)" : "var(--bg-1)",
-                borderColor: active ? "var(--border-focus)" : "var(--border-subtle)",
+                borderColor: active
+                  ? "var(--border-focus)"
+                  : "var(--border-subtle)",
               }}
             >
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, width: "100%" }}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 8,
+                  width: "100%",
+                }}
+              >
                 <div style={{ fontWeight: 900 }}>{DOW[idx]}</div>
-                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{formatKoreanMD(d)}</div>
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                  {formatKoreanMD(d)}
+                </div>
               </div>
-              <div style={{ marginTop: 6, fontSize: 12, color: "var(--text-muted)" }}>{count}건</div>
+              <div
+                style={{
+                  marginTop: 6,
+                  fontSize: 12,
+                  color: "var(--text-muted)",
+                }}
+              >
+                {count}건
+              </div>
             </button>
           );
         })}
@@ -381,7 +422,14 @@ export default function StudentCalendar() {
 
       {/* Selected day panel */}
       <div className="u-panel" style={{ padding: 14 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 10,
+            alignItems: "center",
+          }}
+        >
           <div style={{ fontWeight: 900 }}>
             {DOW[selectedIdx]}요일 · {formatKoreanMD(selectedDate)}
           </div>
@@ -392,9 +440,13 @@ export default function StudentCalendar() {
 
         <div style={{ marginTop: 12 }}>
           {fetching ? (
-            <div style={{ color: "var(--text-muted)", fontSize: 13 }}>불러오는 중...</div>
+            <div style={{ color: "var(--text-muted)", fontSize: 13 }}>
+              불러오는 중...
+            </div>
           ) : selectedList.length === 0 ? (
-            <div style={{ color: "var(--text-muted)", fontSize: 13 }}>등록된 학습 없음</div>
+            <div style={{ color: "var(--text-muted)", fontSize: 13 }}>
+              등록된 학습 없음
+            </div>
           ) : (
             <div className="l-section">
               {selectedList.map((ev) => (
@@ -407,9 +459,22 @@ export default function StudentCalendar() {
                     borderRadius: "var(--radius-2)",
                   }}
                 >
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: 10,
+                    }}
+                  >
                     <div>
-                      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: 8,
+                          alignItems: "center",
+                          flexWrap: "wrap",
+                        }}
+                      >
                         <span
                           className="u-panel"
                           style={{
@@ -422,14 +487,25 @@ export default function StudentCalendar() {
                           {ev.category}
                         </span>
 
-                        <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                        <span
+                          style={{ fontSize: 12, color: "var(--text-muted)" }}
+                        >
                           {minutesToHMText(ev.duration_min)}
                         </span>
                       </div>
 
-                      <div style={{ marginTop: 6, fontWeight: 900 }}>{ev.title}</div>
+                      <div style={{ marginTop: 6, fontWeight: 900 }}>
+                        {ev.title}
+                      </div>
                       {ev.description ? (
-                        <div style={{ marginTop: 6, color: "var(--text-muted)", fontSize: 13, whiteSpace: "pre-wrap" }}>
+                        <div
+                          style={{
+                            marginTop: 6,
+                            color: "var(--text-muted)",
+                            fontSize: 13,
+                            whiteSpace: "pre-wrap",
+                          }}
+                        >
                           {ev.description}
                         </div>
                       ) : null}
@@ -454,7 +530,9 @@ export default function StudentCalendar() {
       {/* Add modal */}
       <Modal
         open={addOpen}
-        title={`${DOW[selectedIdx]}요일 (${formatKoreanMD(selectedDate)}) 일정 추가`}
+        title={`${DOW[selectedIdx]}요일 (${formatKoreanMD(
+          selectedDate
+        )}) 일정 추가`}
         onClose={() => setAddOpen(false)}
       >
         <div className="l-section">
@@ -463,7 +541,9 @@ export default function StudentCalendar() {
             <select
               className="c-ctl c-input"
               value={draft.category}
-              onChange={(e) => setDraft((p) => ({ ...p, category: e.target.value }))}
+              onChange={(e) =>
+                setDraft((p) => ({ ...p, category: e.target.value }))
+              }
             >
               {CATEGORIES.map((c) => (
                 <option key={c} value={c}>
@@ -478,7 +558,9 @@ export default function StudentCalendar() {
             <input
               className="c-ctl c-input"
               value={draft.title}
-              onChange={(e) => setDraft((p) => ({ ...p, title: e.target.value }))}
+              onChange={(e) =>
+                setDraft((p) => ({ ...p, title: e.target.value }))
+              }
               placeholder="학습 내용"
               autoFocus
             />
@@ -493,7 +575,9 @@ export default function StudentCalendar() {
               step={1}
               inputMode="numeric"
               value={draft.minutes}
-              onChange={(e) => setDraft((p) => ({ ...p, minutes: e.target.value }))}
+              onChange={(e) =>
+                setDraft((p) => ({ ...p, minutes: e.target.value }))
+              }
               placeholder="60"
             />
             <div className="f-hint">예시: 30, 60</div>
@@ -504,17 +588,29 @@ export default function StudentCalendar() {
             <textarea
               className="c-ctl c-textarea"
               value={draft.description}
-              onChange={(e) => setDraft((p) => ({ ...p, description: e.target.value }))}
+              onChange={(e) =>
+                setDraft((p) => ({ ...p, description: e.target.value }))
+              }
               placeholder="자유 메모"
               rows={3}
             />
           </div>
 
           <div className="m-footer" style={{ padding: 0 }}>
-            <button className="c-ctl c-btn" type="button" onClick={() => setAddOpen(false)} disabled={saving}>
+            <button
+              className="c-ctl c-btn"
+              type="button"
+              onClick={() => setAddOpen(false)}
+              disabled={saving}
+            >
               취소
             </button>
-            <button className="c-ctl c-btn" type="button" onClick={addEvent} disabled={saving}>
+            <button
+              className="c-ctl c-btn"
+              type="button"
+              onClick={addEvent}
+              disabled={saving}
+            >
               {saving ? "저장중..." : "등록"}
             </button>
           </div>
