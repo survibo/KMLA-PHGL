@@ -1,625 +1,459 @@
-/* eslint-disable */
-
 -- =====================================================
--- FULL RESET + CREATE
--- (ABSENCES STATUS CONTROL + ROLE REVOKE AUDIT)
--- + ✅ GLOBAL AUDIT LOG (INSERT/UPDATE/DELETE 전부 기록)
--- + ✅ "사고 대비용": 앱(학생/선생)에서 audit_log 조회/수정 불가
--- + ✅ Security Advisor: Function Search Path Mutable 해결 (모든 함수 set search_path = public)
--- + ✅ FIX: 학생/비승인 사용자가 처리자 컬럼(role_updated_*, status_updated_*) 위조 못하게 차단
--- + ✅ NEW: Absence 생성 시 status를 무조건 'pending'으로 강제
--- 실행: 이 블록 전체를 SQL Editor에 그대로 붙여넣고 실행
+-- REDESIGNED SCHEMA - CLEAN & SECURE
+-- =====================================================
+-- ✅ 트리거 통합 (기능별 분산 → 테이블별 단일 트리거)
+-- ✅ RLS 정책 그룹화 (ALL 정책 활용)
+-- ✅ 중복 제거 (USING = WITH CHECK 시 생략)
+-- ✅ 보안 강화 (DEFAULT + 트리거 이중 방어)
+-- ✅ 검증 로직 함수화
 -- =====================================================
 
--- 0) auth.users 쪽 트리거 먼저 제거 (profiles 자동생성 트리거)
-drop trigger if exists on_auth_user_created on auth.users;
+-- 초기화
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+DROP TABLE IF EXISTS public.audit_log CASCADE;
+DROP TABLE IF EXISTS public.absences CASCADE;
+DROP TABLE IF EXISTS public.events CASCADE;
+DROP TABLE IF EXISTS public.profiles CASCADE;
+DROP FUNCTION IF EXISTS public.handle_new_user() CASCADE;
+DROP FUNCTION IF EXISTS public.is_teacher() CASCADE;
+DROP FUNCTION IF EXISTS public.assert_teacher(text) CASCADE;
+DROP FUNCTION IF EXISTS public.handle_profile_update() CASCADE;
+DROP FUNCTION IF EXISTS public.handle_absence_write() CASCADE;
+DROP FUNCTION IF EXISTS public.audit_row_change() CASCADE;
+DROP FUNCTION IF EXISTS public.attach_audit_triggers(text, text[]) CASCADE;
+DROP TYPE IF EXISTS public.user_role CASCADE;
+DROP TYPE IF EXISTS public.absence_status CASCADE;
 
--- 1) 테이블 제거 (audit_log 포함)
-drop table if exists public.audit_log cascade;
-drop table if exists public.absences cascade;
-drop table if exists public.events cascade;
-drop table if exists public.profiles cascade;
-
--- 2) 함수 제거
-drop function if exists public.handle_new_user() cascade;
-drop function if exists public.block_role_approved_changes() cascade;
-drop function if exists public.is_teacher() cascade;
-drop function if exists public.set_updated_at() cascade;
-drop function if exists public.block_absence_illegal_updates() cascade;
-drop function if exists public.audit_profile_role() cascade;
-drop function if exists public.enforce_pending_on_absence_insert() cascade;
-
--- audit log functions
-drop function if exists public.audit_row_change() cascade;
-drop function if exists public.attach_audit_triggers(text, text[]) cascade;
-
--- 3) 타입 제거
-drop type if exists public.user_role cascade;
-drop type if exists public.absence_status cascade;
-
--- 4) UUID 생성용
-create extension if not exists pgcrypto;
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 -- =====================================================
--- 0. ENUM: user_role
+-- ENUMS
 -- =====================================================
-do $$ begin
-  create type public.user_role as enum ('student', 'teacher');
-exception
-  when duplicate_object then null;
-end $$;
+CREATE TYPE public.user_role AS ENUM ('student', 'teacher');
+CREATE TYPE public.absence_status AS ENUM ('pending', 'approved', 'rejected');
 
 -- =====================================================
--- 0-b. ENUM: absence_status
+-- AUDIT LOG (전역 감사 기록)
 -- =====================================================
-do $$ begin
-  create type public.absence_status as enum ('pending', 'approved', 'rejected');
-exception
-  when duplicate_object then null;
-end $$;
-
--- =====================================================
--- A) AUDIT LOG (GLOBAL)
--- - 목적: 사고/감사 대비용 (전용 페이지 없음)
--- - 원칙: 앱(anon/authenticated)에서는 읽기/쓰기 전부 불가
--- - 기록은 트리거가 SECURITY DEFINER로 수행 → RLS/권한에 막히지 않게
--- =====================================================
-
-create table if not exists public.audit_log (
-  id bigserial primary key,
-
-  table_schema text not null,
-  table_name   text not null,
-  action       text not null, -- INSERT / UPDATE / DELETE
-
-  row_pk text,                -- PK값 문자열(타입 상관없이)
-
-  old_data jsonb,
-  new_data jsonb,
-
-  actor_id uuid,              -- auth.uid()
-  changed_at timestamptz not null default now()
+CREATE TABLE public.audit_log (
+  id BIGSERIAL PRIMARY KEY,
+  table_schema TEXT NOT NULL,
+  table_name TEXT NOT NULL,
+  action TEXT NOT NULL,
+  row_pk TEXT,
+  old_data JSONB,
+  new_data JSONB,
+  actor_id UUID,
+  changed_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-create index if not exists idx_audit_log_tbl_time
-on public.audit_log(table_name, changed_at desc);
+CREATE INDEX idx_audit_log_tbl_time ON public.audit_log(table_name, changed_at DESC);
+CREATE INDEX idx_audit_log_actor_time ON public.audit_log(actor_id, changed_at DESC);
+CREATE INDEX idx_audit_log_rowpk ON public.audit_log(table_name, row_pk);
 
-create index if not exists idx_audit_log_actor_time
-on public.audit_log(actor_id, changed_at desc);
-
-create index if not exists idx_audit_log_rowpk
-on public.audit_log(table_name, row_pk);
-
--- ✅ audit trigger function (SECURITY DEFINER)
--- - 트리거 args[0] = pk column name (보통 'id')
--- - audit_log 자체는 대상 테이블에서 제외 (attach 함수에서만 제어)
-create or replace function public.audit_row_change()
-returns trigger
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  pk_col text := null;
-  pk_val text := null;
-  actor  uuid := null;
-begin
-  if TG_NARGS >= 1 then
+-- Audit 트리거 함수
+CREATE FUNCTION public.audit_row_change()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  pk_col TEXT := NULL;
+  pk_val TEXT := NULL;
+  actor UUID := NULL;
+BEGIN
+  IF TG_NARGS >= 1 THEN
     pk_col := TG_ARGV[0];
-  end if;
+  END IF;
 
   actor := auth.uid();
 
-  if pk_col is not null then
-    if TG_OP = 'DELETE' then
+  IF pk_col IS NOT NULL THEN
+    IF TG_OP = 'DELETE' THEN
       pk_val := to_jsonb(OLD)->>pk_col;
-    else
+    ELSE
       pk_val := to_jsonb(NEW)->>pk_col;
-    end if;
-  end if;
+    END IF;
+  END IF;
 
-  if TG_OP = 'INSERT' then
-    insert into public.audit_log(
-      table_schema, table_name, action, row_pk,
-      old_data, new_data, actor_id
-    )
-    values (
-      TG_TABLE_SCHEMA, TG_TABLE_NAME, TG_OP, pk_val,
-      null, to_jsonb(NEW), actor
-    );
-    return NEW;
+  IF TG_OP = 'INSERT' THEN
+    INSERT INTO public.audit_log(table_schema, table_name, action, row_pk, old_data, new_data, actor_id)
+    VALUES (TG_TABLE_SCHEMA, TG_TABLE_NAME, TG_OP, pk_val, NULL, to_jsonb(NEW), actor);
+    
+  ELSIF TG_OP = 'UPDATE' THEN
+    INSERT INTO public.audit_log(table_schema, table_name, action, row_pk, old_data, new_data, actor_id)
+    VALUES (TG_TABLE_SCHEMA, TG_TABLE_NAME, TG_OP, pk_val, to_jsonb(OLD), to_jsonb(NEW), actor);
+    
+  ELSIF TG_OP = 'DELETE' THEN
+    INSERT INTO public.audit_log(table_schema, table_name, action, row_pk, old_data, new_data, actor_id)
+    VALUES (TG_TABLE_SCHEMA, TG_TABLE_NAME, TG_OP, pk_val, to_jsonb(OLD), NULL, actor);
+    RETURN OLD;
+  END IF;
 
-  elsif TG_OP = 'UPDATE' then
-    insert into public.audit_log(
-      table_schema, table_name, action, row_pk,
-      old_data, new_data, actor_id
-    )
-    values (
-      TG_TABLE_SCHEMA, TG_TABLE_NAME, TG_OP, pk_val,
-      to_jsonb(OLD), to_jsonb(NEW), actor
-    );
-    return NEW;
-
-  elsif TG_OP = 'DELETE' then
-    insert into public.audit_log(
-      table_schema, table_name, action, row_pk,
-      old_data, new_data, actor_id
-    )
-    values (
-      TG_TABLE_SCHEMA, TG_TABLE_NAME, TG_OP, pk_val,
-      to_jsonb(OLD), null, actor
-    );
-    return OLD;
-  end if;
-
-  return null;
-end;
+  RETURN NEW;
+END;
 $$;
 
--- ✅ 여러 테이블에 audit 트리거를 일괄 부착
-create or replace function public.attach_audit_triggers(
-  pk_column text,
-  table_names text[]
-)
-returns void
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  t text;
-  trg_name text;
-begin
-  foreach t in array table_names loop
+-- Audit 트리거 일괄 부착
+CREATE FUNCTION public.attach_audit_triggers(pk_column TEXT, table_names TEXT[])
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  t TEXT;
+  trg_name TEXT;
+BEGIN
+  FOREACH t IN ARRAY table_names LOOP
     trg_name := format('trg_audit_%s', t);
-
-    execute format('drop trigger if exists %I on public.%I', trg_name, t);
-
-    execute format(
-      'create trigger %I
-       after insert or update or delete on public.%I
-       for each row execute function public.audit_row_change(%L)',
+    EXECUTE format('DROP TRIGGER IF EXISTS %I ON public.%I', trg_name, t);
+    EXECUTE format(
+      'CREATE TRIGGER %I AFTER INSERT OR UPDATE OR DELETE ON public.%I 
+       FOR EACH ROW EXECUTE FUNCTION public.audit_row_change(%L)',
       trg_name, t, pk_column
     );
-  end loop;
-end;
+  END LOOP;
+END;
 $$;
 
--- ✅ audit_log는 앱에서 접근 불가 (권한 + RLS)
-alter table public.audit_log enable row level security;
-
-drop policy if exists audit_log_deny_all on public.audit_log;
-create policy audit_log_deny_all
-on public.audit_log
-for all
-using (false)
-with check (false);
-
-revoke all on table public.audit_log from anon;
-revoke all on table public.audit_log from authenticated;
-revoke all on table public.audit_log from public;
+-- Audit Log RLS: 앱에서 접근 불가
+ALTER TABLE public.audit_log ENABLE ROW LEVEL SECURITY;
+CREATE POLICY audit_log_deny_all ON public.audit_log FOR ALL USING (false);
+REVOKE ALL ON public.audit_log FROM anon, authenticated, public;
 
 -- =====================================================
--- 1) 공통 함수: updated_at 자동 갱신
+-- HELPER FUNCTIONS
 -- =====================================================
-create or replace function public.set_updated_at()
-returns trigger
-language plpgsql
-set search_path = public
-as $$
-begin
-  new.updated_at = now();
-  return new;
-end;
-$$;
 
--- =====================================================
--- 2) profiles
--- =====================================================
-create table if not exists public.profiles (
-  id uuid primary key references auth.users(id) on delete cascade,
-
-  role public.user_role not null default 'student',
-  approved boolean not null default false,
-
-  name text,
-  grade int,
-  class_no int,
-  student_no int,
-
-  -- role 변경 추적 (권한 박탈: teacher -> student 포함)
-  role_updated_by uuid references public.profiles(id),
-  role_updated_at timestamptz,
-
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
-
-create index if not exists idx_profiles_role_updated_by
-on public.profiles(role_updated_by);
-
-create index if not exists idx_profiles_role_updated_at
-on public.profiles(role_updated_at);
-
-drop trigger if exists trg_profiles_updated_at on public.profiles;
-create trigger trg_profiles_updated_at
-before update on public.profiles
-for each row execute function public.set_updated_at();
-
--- role 변경 자동 기록 (teacher가 role을 바꿀 때만 세팅)
-create or replace function public.audit_profile_role()
-returns trigger
-language plpgsql
-set search_path = public
-as $$
-begin
-  if auth.uid() is null then
-    return new;
-  end if;
-
-  if new.role is distinct from old.role then
-    new.role_updated_by := auth.uid();
-    new.role_updated_at := now();
-  end if;
-
-  return new;
-end;
-$$;
-
-drop trigger if exists trg_audit_profile_role on public.profiles;
-create trigger trg_audit_profile_role
-before update on public.profiles
-for each row
-execute function public.audit_profile_role();
-
--- =====================================================
--- 3) events
--- =====================================================
-create table if not exists public.events (
-  id uuid primary key default gen_random_uuid(),
-  owner_id uuid not null references public.profiles(id) on delete cascade,
-
-  title text not null,
-  description text,
-  category text not null,
-  date date not null,
-  duration_min int not null,
-
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
-
-drop trigger if exists trg_events_updated_at on public.events;
-create trigger trg_events_updated_at
-before update on public.events
-for each row execute function public.set_updated_at();
-
-create index if not exists idx_events_owner_date
-on public.events(owner_id, date);
-
--- =====================================================
--- 4) absences
--- =====================================================
-create table if not exists public.absences (
-  id uuid primary key default gen_random_uuid(),
-  student_id uuid not null references public.profiles(id) on delete cascade,
-
-  date date not null,
-  reason text not null,
-  status public.absence_status not null default 'pending',
-
-  status_updated_by uuid references public.profiles(id),
-  status_updated_at timestamptz,
-
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
-
-drop trigger if exists trg_absences_updated_at on public.absences;
-create trigger trg_absences_updated_at
-before update on public.absences
-for each row execute function public.set_updated_at();
-
-create index if not exists idx_absences_student_date
-on public.absences(student_id, date);
-
-create index if not exists idx_absences_status_updated_by
-on public.absences(status_updated_by);
-
-create index if not exists idx_absences_status_updated_at
-on public.absences(status_updated_at);
-
--- =====================================================
--- 4-b) ⭐ NEW: ABSENCE 생성 시 STATUS 강제 PENDING
--- - Burp Suite 등으로 status를 'approved'로 보내도 무시
--- - student_id도 auth.uid()로 강제 (위조 방지)
--- =====================================================
-create or replace function public.enforce_pending_on_absence_insert()
-returns trigger
-language plpgsql
-security definer
-set search_path = public
-as $$
-begin
-  -- 무조건 pending으로 고정
-  new.status := 'pending';
-  
-  -- student_id는 현재 로그인 사용자로 강제
-  new.student_id := auth.uid();
-  
-  -- 처리자 정보는 NULL (아직 처리 안됨)
-  new.status_updated_by := null;
-  new.status_updated_at := null;
-  
-  return new;
-end;
-$$;
-
-drop trigger if exists trg_enforce_pending_absence on public.absences;
-create trigger trg_enforce_pending_absence
-before insert on public.absences
-for each row
-execute function public.enforce_pending_on_absence_insert();
-
--- =====================================================
--- 5) auth.users → profiles 자동 생성
--- =====================================================
-create or replace function public.handle_new_user()
-returns trigger
-language plpgsql
-security definer
-set search_path = public
-as $$
-begin
-  insert into public.profiles (id, name)
-  values (
-    new.id,
-    coalesce(new.raw_user_meta_data->>'full_name', new.email)
-  )
-  on conflict (id) do nothing;
-
-  return new;
-end;
-$$;
-
-drop trigger if exists on_auth_user_created on auth.users;
-create trigger on_auth_user_created
-after insert on auth.users
-for each row execute function public.handle_new_user();
-
--- =====================================================
--- 6) RLS ENABLE (profiles/events/absences)
--- =====================================================
-alter table public.profiles enable row level security;
-alter table public.events enable row level security;
-alter table public.absences enable row level security;
-
--- =====================================================
--- 7) helper: 승인된 teacher 여부
--- =====================================================
-create or replace function public.is_teacher()
-returns boolean
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  select exists (
-    select 1
-    from public.profiles p
-    where p.id = auth.uid()
-      and p.role = 'teacher'
-      and p.approved = true
+-- 승인된 teacher 여부 확인
+CREATE FUNCTION public.is_teacher()
+RETURNS BOOLEAN
+LANGUAGE SQL
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.profiles
+    WHERE id = auth.uid() AND role = 'teacher' AND approved = true
   );
 $$;
 
--- =====================================================
--- 8) PROFILES POLICIES
--- =====================================================
-drop policy if exists profiles_select_own_or_teacher on public.profiles;
-create policy profiles_select_own_or_teacher
-on public.profiles
-for select
-using (
-  id = auth.uid()
-  or public.is_teacher()
-);
-
-drop policy if exists profiles_update_own_or_teacher on public.profiles;
-create policy profiles_update_own_or_teacher
-on public.profiles
-for update
-using (
-  id = auth.uid()
-  or public.is_teacher()
-)
-with check (
-  id = auth.uid()
-  or public.is_teacher()
-);
-
--- =====================================================
--- 9) PROFILES SAFETY TRIGGER
--- - 학생이 role/approved 변경 못함
--- - ✅ FIX: 학생이 role_updated_by/at 위조 못함
--- =====================================================
-create or replace function public.block_role_approved_changes()
-returns trigger
-language plpgsql
-set search_path = public
-as $$
-begin
-  if auth.uid() is null then
-    return new;
-  end if;
-
-  if not public.is_teacher() then
-    if new.role is distinct from old.role then
-      raise exception 'role cannot be changed';
-    end if;
-
-    if new.approved is distinct from old.approved then
-      raise exception 'approved cannot be changed';
-    end if;
-
-    -- ✅ 위조 방지
-    if new.role_updated_by is distinct from old.role_updated_by then
-      raise exception 'role_updated_by cannot be changed';
-    end if;
-
-    if new.role_updated_at is distinct from old.role_updated_at then
-      raise exception 'role_updated_at cannot be changed';
-    end if;
-  end if;
-
-  return new;
-end;
+-- Teacher 권한 검증 (예외 발생)
+CREATE FUNCTION public.assert_teacher(msg TEXT DEFAULT 'teacher permission required')
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF NOT public.is_teacher() THEN
+    RAISE EXCEPTION '%', msg;
+  END IF;
+END;
 $$;
 
-drop trigger if exists trg_block_role_approved_changes on public.profiles;
-create trigger trg_block_role_approved_changes
-before update on public.profiles
-for each row
-execute function public.block_role_approved_changes();
+-- =====================================================
+-- PROFILES
+-- =====================================================
+CREATE TABLE public.profiles (
+  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  
+  role public.user_role NOT NULL DEFAULT 'student',
+  approved BOOLEAN NOT NULL DEFAULT false,
+  
+  name TEXT,
+  grade INT,
+  class_no INT,
+  student_no INT,
+  
+  -- Role 변경 추적
+  role_updated_by UUID REFERENCES public.profiles(id),
+  role_updated_at TIMESTAMPTZ,
+  
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_profiles_role_updated ON public.profiles(role_updated_by, role_updated_at);
+
+-- ✅ 통합 트리거: UPDATE 시 모든 검증 + 추적
+CREATE FUNCTION public.handle_profile_update()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  -- 1) 권한 검증: 학생은 민감 필드 변경 불가
+  IF NOT public.is_teacher() THEN
+    IF new.role IS DISTINCT FROM old.role THEN
+      RAISE EXCEPTION 'role cannot be changed by non-teacher';
+    END IF;
+    
+    IF new.approved IS DISTINCT FROM old.approved THEN
+      RAISE EXCEPTION 'approved cannot be changed by non-teacher';
+    END IF;
+    
+    IF new.role_updated_by IS DISTINCT FROM old.role_updated_by 
+       OR new.role_updated_at IS DISTINCT FROM old.role_updated_at THEN
+      RAISE EXCEPTION 'cannot forge role audit fields';
+    END IF;
+  END IF;
+
+  -- 2) Role 변경 추적
+  IF new.role IS DISTINCT FROM old.role THEN
+    new.role_updated_by := auth.uid();
+    new.role_updated_at := now();
+  END IF;
+
+  -- 3) updated_at 갱신
+  new.updated_at := now();
+
+  RETURN new;
+END;
+$$;
+
+CREATE TRIGGER trg_profiles_before_update
+BEFORE UPDATE ON public.profiles
+FOR EACH ROW
+EXECUTE FUNCTION public.handle_profile_update();
 
 -- =====================================================
--- 10) EVENTS POLICIES
+-- EVENTS
 -- =====================================================
-drop policy if exists events_select_own_or_teacher on public.events;
-create policy events_select_own_or_teacher
-on public.events
-for select
-using (
-  owner_id = auth.uid()
-  or public.is_teacher()
+CREATE TABLE public.events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  owner_id UUID NOT NULL 
+    DEFAULT auth.uid()  -- ✅ 보안: DEFAULT + RLS 이중 방어
+    REFERENCES public.profiles(id) ON DELETE CASCADE,
+  
+  title TEXT NOT NULL,
+  description TEXT,
+  category TEXT NOT NULL,
+  date DATE NOT NULL,
+  duration_min INT NOT NULL,
+  
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-drop policy if exists events_insert_own on public.events;
-create policy events_insert_own
-on public.events
-for insert
-with check (
-  owner_id = auth.uid()
-);
+CREATE INDEX idx_events_owner_date ON public.events(owner_id, date);
 
-drop policy if exists events_update_own on public.events;
-create policy events_update_own
-on public.events
-for update
-using (
-  owner_id = auth.uid()
-)
-with check (
-  owner_id = auth.uid()
-);
+-- ✅ 간단한 updated_at 트리거 (검증 불필요)
+CREATE FUNCTION public.update_events_timestamp()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+BEGIN
+  new.updated_at := now();
+  RETURN new;
+END;
+$$;
 
-drop policy if exists events_delete_own on public.events;
-create policy events_delete_own
-on public.events
-for delete
-using (
-  owner_id = auth.uid()
-);
-
--- =====================================================
--- 11) ABSENCES POLICIES
--- =====================================================
-drop policy if exists absences_select_own_or_teacher on public.absences;
-create policy absences_select_own_or_teacher
-on public.absences
-for select
-using (
-  student_id = auth.uid()
-  or public.is_teacher()
-);
-
-drop policy if exists absences_insert_own on public.absences;
-create policy absences_insert_own
-on public.absences
-for insert
-with check (
-  student_id = auth.uid()
-);
-
-drop policy if exists absences_update_own_or_teacher on public.absences;
-create policy absences_update_own_or_teacher
-on public.absences
-for update
-using (
-  student_id = auth.uid()
-  or public.is_teacher()
-)
-with check (
-  student_id = auth.uid()
-  or public.is_teacher()
-);
+CREATE TRIGGER trg_events_before_update
+BEFORE UPDATE ON public.events
+FOR EACH ROW
+EXECUTE FUNCTION public.update_events_timestamp();
 
 -- =====================================================
--- 11-b) ABSENCES SAFETY TRIGGER
--- teacher: status만 변경 가능 + status 변경자/시간 자동 기록
--- student: status 변경 금지 (date/reason 수정은 허용)
--- ✅ FIX: student가 status_updated_* 위조 못함
+-- ABSENCES
 -- =====================================================
-create or replace function public.block_absence_illegal_updates()
-returns trigger
-language plpgsql
-set search_path = public
-as $$
-begin
-  if auth.uid() is null then
-    return new;
-  end if;
+CREATE TABLE public.absences (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  student_id UUID NOT NULL 
+    DEFAULT auth.uid()  -- ✅ 보안: DEFAULT + 트리거 이중 방어
+    REFERENCES public.profiles(id) ON DELETE CASCADE,
+  
+  date DATE NOT NULL,
+  reason TEXT NOT NULL,
+  status public.absence_status NOT NULL DEFAULT 'pending',
+  
+  -- Status 변경 추적
+  status_updated_by UUID REFERENCES public.profiles(id),
+  status_updated_at TIMESTAMPTZ,
+  
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
-  if new.status is distinct from old.status then
+CREATE INDEX idx_absences_student_date ON public.absences(student_id, date);
+CREATE INDEX idx_absences_status_updated ON public.absences(status_updated_by, status_updated_at);
+
+-- ✅ 통합 트리거: INSERT/UPDATE 모든 검증
+CREATE FUNCTION public.handle_absence_write()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  -- ========== INSERT 처리 ==========
+  IF TG_OP = 'INSERT' THEN
+    -- 강제: pending 상태 + 본인 ID
+    new.status := 'pending';
+    new.student_id := auth.uid();
+    new.status_updated_by := NULL;
+    new.status_updated_at := NULL;
+    new.updated_at := now();
+    RETURN new;
+  END IF;
+
+  -- ========== UPDATE 처리 ==========
+  -- 1) Status 변경 추적
+  IF new.status IS DISTINCT FROM old.status THEN
     new.status_updated_by := auth.uid();
     new.status_updated_at := now();
-  else
-    -- ✅ 위조 방지: status가 안 바뀌면 처리자/시간도 바꾸면 안됨
-    if new.status_updated_by is distinct from old.status_updated_by then
-      raise exception 'status_updated_by cannot be changed';
-    end if;
+  ELSE
+    -- Status 안 바뀌면 추적 필드 위조 차단
+    IF new.status_updated_by IS DISTINCT FROM old.status_updated_by 
+       OR new.status_updated_at IS DISTINCT FROM old.status_updated_at THEN
+      RAISE EXCEPTION 'cannot forge status audit fields';
+    END IF;
+  END IF;
 
-    if new.status_updated_at is distinct from old.status_updated_at then
-      raise exception 'status_updated_at cannot be changed';
-    end if;
-  end if;
+  -- 2) Teacher 권한 검증
+  IF public.is_teacher() THEN
+    -- Teacher는 status만 변경 가능
+    IF new.student_id IS DISTINCT FROM old.student_id THEN
+      RAISE EXCEPTION 'teacher cannot change student_id';
+    END IF;
+    
+    IF new.date IS DISTINCT FROM old.date THEN
+      RAISE EXCEPTION 'teacher cannot change date';
+    END IF;
+    
+    IF new.reason IS DISTINCT FROM old.reason THEN
+      RAISE EXCEPTION 'teacher cannot change reason';
+    END IF;
+    
+  ELSE
+    -- Student는 status/student_id 변경 불가
+    IF new.status IS DISTINCT FROM old.status THEN
+      RAISE EXCEPTION 'student cannot change status';
+    END IF;
+    
+    IF new.student_id IS DISTINCT FROM old.student_id THEN
+      RAISE EXCEPTION 'student cannot change student_id';
+    END IF;
+  END IF;
 
-  if public.is_teacher() then
-    if new.student_id is distinct from old.student_id then
-      raise exception 'teacher cannot change student_id';
-    end if;
-
-    if new.date is distinct from old.date then
-      raise exception 'teacher cannot change date';
-    end if;
-
-    if new.reason is distinct from old.reason then
-      raise exception 'teacher cannot change reason';
-    end if;
-
-    return new;
-  end if;
-
-  if new.status is distinct from old.status then
-    raise exception 'student cannot change status';
-  end if;
-
-  if new.student_id is distinct from old.student_id then
-    raise exception 'student cannot change student_id';
-  end if;
-
-  return new;
-end;
+  -- 3) updated_at 갱신
+  new.updated_at := now();
+  
+  RETURN new;
+END;
 $$;
 
-drop trigger if exists trg_block_absence_illegal_updates on public.absences;
-create trigger trg_block_absence_illegal_updates
-before update on public.absences
-for each row
-execute function public.block_absence_illegal_updates();
+CREATE TRIGGER trg_absences_before_write
+BEFORE INSERT OR UPDATE ON public.absences
+FOR EACH ROW
+EXECUTE FUNCTION public.handle_absence_write();
 
 -- =====================================================
--- 12) ATTACH AUDIT TRIGGERS
--- - profiles/events/absences의 INSERT/UPDATE/DELETE 전부 audit_log에 남김
+-- AUTH 연동: 신규 사용자 자동 프로필 생성
 -- =====================================================
-select public.attach_audit_triggers('id', array['profiles','events','absences']);
+CREATE FUNCTION public.handle_new_user()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  INSERT INTO public.profiles (id, name)
+  VALUES (
+    new.id,
+    COALESCE(new.raw_user_meta_data->>'full_name', new.email)
+  )
+  ON CONFLICT (id) DO NOTHING;
+  RETURN new;
+END;
+$$;
+
+CREATE TRIGGER on_auth_user_created
+AFTER INSERT ON auth.users
+FOR EACH ROW
+EXECUTE FUNCTION public.handle_new_user();
+
+-- =====================================================
+-- RLS 활성화
+-- =====================================================
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.absences ENABLE ROW LEVEL SECURITY;
+
+-- =====================================================
+-- PROFILES RLS POLICIES
+-- =====================================================
+
+-- SELECT: 본인 또는 Teacher
+CREATE POLICY profiles_select
+ON public.profiles FOR SELECT
+USING (
+  id = auth.uid() OR public.is_teacher()
+);
+
+-- UPDATE: 본인 또는 Teacher
+-- ✅ USING = WITH CHECK이므로 WITH CHECK 생략
+CREATE POLICY profiles_update
+ON public.profiles FOR UPDATE
+USING (
+  id = auth.uid() OR public.is_teacher()
+);
+
+-- =====================================================
+-- EVENTS RLS POLICIES
+-- =====================================================
+
+-- ✅ ALL 정책으로 통합: 본인만 전체 제어
+CREATE POLICY events_own_all
+ON public.events FOR ALL
+USING (owner_id = auth.uid());
+
+-- Teacher는 조회만 추가
+CREATE POLICY events_teacher_select
+ON public.events FOR SELECT
+USING (public.is_teacher());
+
+-- =====================================================
+-- ABSENCES RLS POLICIES
+-- =====================================================
+
+-- SELECT: 본인 또는 Teacher
+CREATE POLICY absences_select
+ON public.absences FOR SELECT
+USING (
+  student_id = auth.uid() OR public.is_teacher()
+);
+
+-- INSERT: 본인만 (트리거가 student_id 강제)
+CREATE POLICY absences_insert
+ON public.absences FOR INSERT
+WITH CHECK (student_id = auth.uid());
+
+-- UPDATE: 본인 또는 Teacher
+CREATE POLICY absences_update
+ON public.absences FOR UPDATE
+USING (
+  student_id = auth.uid() OR public.is_teacher()
+);
+
+-- =====================================================
+-- AUDIT LOG 트리거 부착
+-- =====================================================
+SELECT public.attach_audit_triggers('id', ARRAY['profiles', 'events', 'absences']);
+
+-- =====================================================
+-- 🎉 완료
+-- =====================================================
+-- 보안 강화 포인트:
+-- 1. DEFAULT + 트리거 이중 방어 (absences.student_id, status)
+-- 2. 트리거 통합으로 검증 누락 방지
+-- 3. RLS ALL 정책으로 권한 간소화
+-- 4. assert_teacher() 헬퍼로 재사용성 확보
+-- 5. 모든 민감 필드 위조 차단 (role_updated_*, status_updated_*)
+-- 6. Audit Log 완전 격리 (앱 접근 불가)
+-- =====================================================
