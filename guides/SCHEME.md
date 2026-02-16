@@ -7,6 +7,7 @@
 -- + ✅ "사고 대비용": 앱(학생/선생)에서 audit_log 조회/수정 불가
 -- + ✅ Security Advisor: Function Search Path Mutable 해결 (모든 함수 set search_path = public)
 -- + ✅ FIX: 학생/비승인 사용자가 처리자 컬럼(role_updated_*, status_updated_*) 위조 못하게 차단
+-- + ✅ NEW: Absence 생성 시 status를 무조건 'pending'으로 강제
 -- 실행: 이 블록 전체를 SQL Editor에 그대로 붙여넣고 실행
 -- =====================================================
 
@@ -26,6 +27,7 @@ drop function if exists public.is_teacher() cascade;
 drop function if exists public.set_updated_at() cascade;
 drop function if exists public.block_absence_illegal_updates() cascade;
 drop function if exists public.audit_profile_role() cascade;
+drop function if exists public.enforce_pending_on_absence_insert() cascade;
 
 -- audit log functions
 drop function if exists public.audit_row_change() cascade;
@@ -326,6 +328,38 @@ on public.absences(status_updated_by);
 
 create index if not exists idx_absences_status_updated_at
 on public.absences(status_updated_at);
+
+-- =====================================================
+-- 4-b) ⭐ NEW: ABSENCE 생성 시 STATUS 강제 PENDING
+-- - Burp Suite 등으로 status를 'approved'로 보내도 무시
+-- - student_id도 auth.uid()로 강제 (위조 방지)
+-- =====================================================
+create or replace function public.enforce_pending_on_absence_insert()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  -- 무조건 pending으로 고정
+  new.status := 'pending';
+  
+  -- student_id는 현재 로그인 사용자로 강제
+  new.student_id := auth.uid();
+  
+  -- 처리자 정보는 NULL (아직 처리 안됨)
+  new.status_updated_by := null;
+  new.status_updated_at := null;
+  
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_enforce_pending_absence on public.absences;
+create trigger trg_enforce_pending_absence
+before insert on public.absences
+for each row
+execute function public.enforce_pending_on_absence_insert();
 
 -- =====================================================
 -- 5) auth.users → profiles 자동 생성
