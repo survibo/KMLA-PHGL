@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import { useMyProfile } from "../../hooks/useMyProfile";
 import {
@@ -9,33 +9,109 @@ import {
   toISODate,
 } from "../../features/week";
 
+// ─── Constants ────────────────────────────────────────────────────────────────
+
 const CATEGORIES = ["기초 역량 강화", "진로 탐색"];
 const DOW = ["월", "화", "수", "목", "금", "토", "일"];
+const WEEK_LIMIT = { prev: -7, next: 21 }; // 이전 1주 / 이후 3주
 
-// 개별 항목 표시: 1시간 n분 (정확)
-function minutesToHMText(min) {
-  const m = Number(min) || 0;
-  const h = Math.floor(m / 60);
-  const r = m % 60;
+const DEFAULT_DRAFT = {
+  category: CATEGORIES[0],
+  title: "",
+  description: "",
+  minutes: "60",
+};
 
-  if (h <= 0) return `${r}분`;
-  if (r === 0) return `${h}시간`;
-  return `${h}시간 ${r}분`;
+// ─── Pure helpers ─────────────────────────────────────────────────────────────
+
+/** 분 → "n시간 m분" 형식 (개별 항목용) */
+function formatMinutesAsHM(totalMinutes) {
+  const minutes = Number(totalMinutes) || 0;
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+
+  if (hours <= 0) return `${remainder}분`;
+  if (remainder === 0) return `${hours}시간`;
+  return `${hours}시간 ${remainder}분`;
 }
 
-// 요약(최종 결과) 표시: 소수 1자리 시간 + 불필요한 .0 제거
-function minutesToHoursDecimalText1(min) {
-  const m = Number(min) || 0;
-  const h = m / 60;
-  const s = h.toFixed(1);
-  return `${s.replace(/\.0$/, "")}시간`;
+/** 분 → 소수점 1자리 시간 형식, 불필요한 .0 제거 (주간 요약용) */
+function formatMinutesAsDecimalHours(totalMinutes) {
+  const hours = (Number(totalMinutes) || 0) / 60;
+  return `${hours.toFixed(1).replace(/\.0$/, "")}시간`;
 }
 
-// 입력: 분 문자열 -> 자연수(1 이상의 정수)만 허용
-function parseMinutes(minutesStr) {
-  if (!/^[1-9]\d*$/.test(minutesStr)) return null;
-  return Number(minutesStr);
+/** 분 문자열 검증 → 1 이상의 자연수만 허용, 아니면 null */
+function parsePositiveInt(value) {
+  return /^[1-9]\d*$/.test(value) ? Number(value) : null;
 }
+
+/** 오늘 기준 이번 주 요일 인덱스 계산 (0=월 ~ 6=일) */
+function getTodayDowIndex() {
+  const today = new Date();
+  const monday = startOfWeekMonday(today);
+  const diff = Math.floor((today - monday) / (1000 * 60 * 60 * 24));
+  return Math.max(0, Math.min(6, diff));
+}
+
+// ─── Supabase API ─────────────────────────────────────────────────────────────
+
+async function fetchWeekEvents({ uid, weekStartISO, weekEndISO }) {
+  const { data, error } = await supabase
+    .from("events")
+    .select(
+      "id, owner_id, title, description, category, date, duration_min, created_at"
+    )
+    .eq("owner_id", uid)
+    .gte("date", weekStartISO)
+    .lte("date", weekEndISO)
+    .order("date", { ascending: true })
+    .order("created_at", { ascending: true });
+
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+async function insertEvent(payload) {
+  const { error } = await supabase.from("events").insert(payload);
+  if (error) throw new Error(error.message);
+}
+
+async function deleteEventById(id) {
+  const { error } = await supabase.from("events").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+// ─── Local custom hook ────────────────────────────────────────────────────────
+
+function useWeekEvents({ uid, weekStartISO, weekEndISO }) {
+  const [events, setEvents] = useState([]);
+  const [fetching, setFetching] = useState(true);
+  const [error, setError] = useState("");
+
+  const load = useCallback(async () => {
+    if (!uid) return;
+    setFetching(true);
+    setError("");
+    try {
+      const data = await fetchWeekEvents({ uid, weekStartISO, weekEndISO });
+      setEvents(data);
+    } catch (err) {
+      setError(err.message);
+      setEvents([]);
+    } finally {
+      setFetching(false);
+    }
+  }, [uid, weekStartISO, weekEndISO]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  return { events, fetching, error, reload: load };
+}
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
 
 function Modal({ open, title, onClose, children }) {
   if (!open) return null;
@@ -56,181 +132,324 @@ function Modal({ open, title, onClose, children }) {
   );
 }
 
+function WeeklySummary({ totals }) {
+  return (
+    <div className="r-split" style={{ marginTop: 10 }}>
+      {CATEGORIES.map((cat) => (
+        <div
+          key={cat}
+          className="u-panel"
+          style={{ padding: 12, background: "var(--bg-2)" }}
+        >
+          <div
+            style={{
+              fontSize: 12,
+              color: "var(--text-muted)",
+              fontWeight: 800,
+            }}
+          >
+            {cat}
+          </div>
+          <div style={{ fontSize: 18, fontWeight: 900, marginTop: 4 }}>
+            {formatMinutesAsDecimalHours(totals[cat])}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function EventCard({ event, onDelete }) {
+  return (
+    <div
+      className="u-panel"
+      style={{
+        background: "var(--bg-2)",
+        padding: 12,
+        borderRadius: "var(--radius-2)",
+      }}
+    >
+      <div
+        style={{ display: "flex", justifyContent: "space-between", gap: 10 }}
+      >
+        <div>
+          <div
+            style={{
+              display: "flex",
+              gap: 8,
+              alignItems: "center",
+              flexWrap: "wrap",
+            }}
+          >
+            <span
+              className="u-panel"
+              style={{
+                borderRadius: 999,
+                padding: "2px 8px",
+                fontSize: 12,
+                background: "var(--bg-1)",
+              }}
+            >
+              {event.category}
+            </span>
+            <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+              {formatMinutesAsHM(event.duration_min)}
+            </span>
+          </div>
+
+          <div style={{ marginTop: 6, fontWeight: 900 }}>{event.title}</div>
+
+          {event.description && (
+            <div
+              style={{
+                marginTop: 6,
+                color: "var(--text-muted)",
+                fontSize: 13,
+                whiteSpace: "pre-wrap",
+              }}
+            >
+              {event.description}
+            </div>
+          )}
+        </div>
+
+        <button
+          className="c-ctl c-btn c-btn--danger"
+          type="button"
+          onClick={() => onDelete(event.id)}
+          style={{ height: "fit-content" }}
+        >
+          삭제
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function AddEventForm({ draft, onChange, onSubmit, onCancel, saving, error }) {
+  return (
+    <div className="l-section">
+      {error && <div className="u-alert u-alert--error">{error}</div>}
+
+      <div className="f-field">
+        <div className="f-label">카테고리</div>
+        <select
+          className="c-ctl c-input"
+          value={draft.category}
+          onChange={(e) => onChange("category", e.target.value)}
+        >
+          {CATEGORIES.map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="f-field">
+        <div className="f-label">내용</div>
+        <input
+          className="c-ctl c-input"
+          value={draft.title}
+          onChange={(e) => onChange("title", e.target.value)}
+          placeholder="ex) 수학의 정석 1단원 연습문제"
+          autoFocus
+        />
+      </div>
+
+      <div className="f-field">
+        <div className="f-label">시간(분)</div>
+        <input
+          className="c-ctl c-input"
+          type="number"
+          min={1}
+          step={1}
+          inputMode="numeric"
+          value={draft.minutes}
+          onChange={(e) => onChange("minutes", e.target.value)}
+          placeholder="60"
+        />
+        <div className="f-hint">예시: 30, 60</div>
+      </div>
+
+      <div className="f-field">
+        <div className="f-label">설명</div>
+        <textarea
+          className="c-ctl c-textarea"
+          value={draft.description}
+          onChange={(e) => onChange("description", e.target.value)}
+          placeholder="ex) 수학의 정석 연습문제 1-1 ~ 1-10"
+          rows={3}
+        />
+      </div>
+
+      <div className="m-footer" style={{ padding: 0 }}>
+        <button
+          className="c-ctl c-btn"
+          type="button"
+          onClick={onCancel}
+          disabled={saving}
+        >
+          취소
+        </button>
+        <button
+          className="c-ctl c-btn"
+          type="button"
+          onClick={onSubmit}
+          disabled={saving}
+        >
+          {saving ? "저장중..." : "등록"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main component ───────────────────────────────────────────────────────────
+
 export default function StudentCalendar() {
   const { session, loading } = useMyProfile();
   const uid = session?.user?.id;
 
+  // ── 주 탐색 상태 ──
+  const thisMonday = useMemo(() => startOfWeekMonday(new Date()), []);
+  const minMonday = useMemo(
+    () => addDays(thisMonday, WEEK_LIMIT.prev),
+    [thisMonday]
+  );
+  const maxMonday = useMemo(
+    () => addDays(thisMonday, WEEK_LIMIT.next),
+    [thisMonday]
+  );
+
   const [weekBase, setWeekBase] = useState(() => startOfWeekMonday(new Date()));
+  const [selectedIdx, setSelectedIdx] = useState(getTodayDowIndex);
+
   const monday = useMemo(() => startOfWeekMonday(weekBase), [weekBase]);
   const weekDays = useMemo(
     () => Array.from({ length: 7 }, (_, i) => addDays(monday, i)),
     [monday]
   );
 
-  // ===== 이동 제한: 오늘 기준 ±3주 =====
-  const thisMonday = useMemo(() => startOfWeekMonday(new Date()), []);
-  const minMonday = useMemo(() => addDays(thisMonday, -7), [thisMonday]); // -1주
-  const maxMonday = useMemo(() => addDays(thisMonday, 21), [thisMonday]); // +3주
-
   const canPrev = monday.getTime() > minMonday.getTime();
   const canNext = monday.getTime() < maxMonday.getTime();
-
-  // "이번 주"인지 판단: 현재 monday가 오늘 기준 이번주 월요일과 같으면 true
-  const isThisWeek = useMemo(() => {
-    return toISODate(monday) === toISODate(thisMonday);
-  }, [monday, thisMonday]);
-
-  const [selectedIdx, setSelectedIdx] = useState(() => {
-    const today = new Date();
-    const wMon = startOfWeekMonday(today);
-    return Math.max(
-      0,
-      Math.min(6, Math.floor((today - wMon) / (1000 * 60 * 60 * 24)))
-    );
-  });
+  const isThisWeek = toISODate(monday) === toISODate(thisMonday);
 
   const selectedDate = weekDays[selectedIdx];
   const selectedISO = toISODate(selectedDate);
-
-  const [events, setEvents] = useState([]);
-  const [fetching, setFetching] = useState(true);
-  const [error, setError] = useState("");
-
-  const [addOpen, setAddOpen] = useState(false);
-  const [saving, setSaving] = useState(false);
-
-  const [draft, setDraft] = useState({
-    category: CATEGORIES[0],
-    title: "",
-    description: "",
-    minutes: "60",
-  });
-
   const weekStartISO = toISODate(monday);
   const weekEndISO = toISODate(addDays(monday, 6));
 
-  async function fetchWeek() {
-    if (!uid) return;
-    setFetching(true);
-    setError("");
-
-    const { data, error } = await supabase
-      .from("events")
-      .select(
-        "id, owner_id, title, description, category, date, duration_min, created_at"
-      )
-      .eq("owner_id", uid)
-      .gte("date", weekStartISO)
-      .lte("date", weekEndISO)
-      .order("date", { ascending: true })
-      .order("created_at", { ascending: true });
-
-    if (error) {
-      setError(error.message);
-      setEvents([]);
-      setFetching(false);
-      return;
-    }
-
-    setEvents(data ?? []);
-    setFetching(false);
-  }
-
-  useEffect(() => {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (!loading && uid) fetchWeek();
-  }, [loading, uid, weekStartISO, weekEndISO]);
+  // ── 이벤트 데이터 ──
+  const {
+    events,
+    fetching,
+    error: fetchError,
+    reload,
+  } = useWeekEvents({ uid: loading ? null : uid, weekStartISO, weekEndISO });
 
   const eventsByDate = useMemo(() => {
-    const map = new Map();
-    for (const d of weekDays) map.set(toISODate(d), []);
+    const map = new Map(weekDays.map((d) => [toISODate(d), []]));
     for (const ev of events) {
-      const key = ev.date;
-      if (!map.has(key)) map.set(key, []);
-      map.get(key).push(ev);
+      map.get(ev.date)?.push(ev);
     }
     return map;
   }, [events, weekDays]);
 
-  const totals = useMemo(() => {
-    const base = { "기초 역량 강화": 0, "진로 탐색": 0 };
-    for (const ev of events) {
-      if (base[ev.category] !== undefined)
-        base[ev.category] += ev.duration_min || 0;
-    }
-    return base;
-  }, [events]);
+  const totals = useMemo(
+    () =>
+      Object.fromEntries(
+        CATEGORIES.map((cat) => [
+          cat,
+          events
+            .filter((ev) => ev.category === cat)
+            .reduce((sum, ev) => sum + (ev.duration_min || 0), 0),
+        ])
+      ),
+    [events]
+  );
 
-  const selectedList = useMemo(() => {
-    return eventsByDate.get(selectedISO) ?? [];
-  }, [eventsByDate, selectedISO]);
+  const selectedList = eventsByDate.get(selectedISO) ?? [];
 
-  function openAdd() {
-    setError("");
-    setDraft({
-      category: CATEGORIES[0],
-      title: "",
-      description: "",
-      minutes: "60",
-    });
+  // ── 주 이동 ──
+  const navigateWeek = (offset) => {
+    setSelectedIdx(0);
+    setWeekBase(addDays(monday, offset));
+  };
+
+  const goToThisWeek = () => {
+    setSelectedIdx(getTodayDowIndex());
+    setWeekBase(startOfWeekMonday(new Date()));
+  };
+
+  // ── 이벤트 추가 모달 상태 ──
+  const [addOpen, setAddOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState("");
+  const [draft, setDraft] = useState(DEFAULT_DRAFT);
+
+  const updateDraft = (field, value) =>
+    setDraft((prev) => ({ ...prev, [field]: value }));
+
+  const openAddModal = () => {
+    setFormError("");
+    setDraft({ ...DEFAULT_DRAFT });
     setAddOpen(true);
-  }
+  };
 
-  async function addEvent() {
+  // ── 이벤트 추가 ──
+  const handleAddEvent = async () => {
     if (!uid) return;
 
     if (!draft.title.trim()) {
-      setError("내용(title)은 비워둘 수 없음");
+      setFormError("내용은 비워둘 수 없음");
       return;
     }
     if (!CATEGORIES.includes(draft.category)) {
-      setError("카테고리가 올바르지 않음");
+      setFormError("카테고리가 올바르지 않음");
       return;
     }
 
-    const minutes = parseMinutes(draft.minutes);
+    const minutes = parsePositiveInt(draft.minutes);
     if (!minutes) {
-      setError("시간(분)은 1 이상의 자연수여야 함");
+      setFormError("시간(분)은 1 이상의 자연수여야 함");
       return;
     }
 
     setSaving(true);
-    setError("");
+    setFormError("");
 
-    const payload = {
-      owner_id: uid,
-      date: selectedISO,
-      category: draft.category,
-      title: draft.title.trim(),
-      description: draft.description.trim() || null,
-      duration_min: minutes,
-    };
-
-    const { error } = await supabase.from("events").insert(payload);
-    if (error) {
-      setError(error.message);
+    try {
+      await insertEvent({
+        owner_id: uid,
+        date: selectedISO,
+        category: draft.category,
+        title: draft.title.trim(),
+        description: draft.description.trim() || null,
+        duration_min: minutes,
+      });
+      setAddOpen(false);
+      await reload();
+    } catch (err) {
+      setFormError(err.message);
+    } finally {
       setSaving(false);
-      return;
     }
+  };
 
-    setSaving(false);
-    setAddOpen(false);
-    await fetchWeek();
-  }
+  // ── 이벤트 삭제 ──
+  const handleDeleteEvent = async (id) => {
+    if (!window.confirm("이 항목을 삭제하겠습니까?")) return;
 
-  async function deleteEvent(id) {
-    const ok = window.confirm("이 항목을 삭제하겠습니까?");
-    if (!ok) return;
-
-    setError("");
-    const { error } = await supabase.from("events").delete().eq("id", id);
-    if (error) {
-      setError(error.message);
-      return;
+    try {
+      await deleteEventById(id);
+      await reload();
+    } catch (err) {
+      window.alert(err.message);
     }
-    await fetchWeek();
-  }
+  };
 
+  // ── 렌더 ──
   if (loading) {
     return (
       <div className="l-page">
@@ -243,7 +462,7 @@ export default function StudentCalendar() {
 
   return (
     <div className="l-page">
-      {/* Header */}
+      {/* ── 헤더 ── */}
       <div className="u-panel" style={{ padding: 14 }}>
         <div className="l-section" style={{ gap: 6 }}>
           <div
@@ -256,8 +475,6 @@ export default function StudentCalendar() {
           >
             <div>
               <div style={{ fontSize: 18, fontWeight: 900 }}>주간 학습</div>
-
-              {/* ✅ 이번 주면 연한 초록색 강조 */}
               <div
                 style={{
                   fontSize: 13,
@@ -280,12 +497,7 @@ export default function StudentCalendar() {
               <button
                 className="c-ctl c-btn"
                 type="button"
-                onClick={() => {
-                  if (!canPrev) return;
-                  setSelectedIdx(0);
-
-                  setWeekBase(addDays(monday, -7));
-                }}
+                onClick={() => navigateWeek(-7)}
                 disabled={!canPrev}
               >
                 이전 주
@@ -293,21 +505,14 @@ export default function StudentCalendar() {
               <button
                 className="c-ctl c-btn"
                 type="button"
-                onClick={() => {
-                  setSelectedIdx(0);
-                  setWeekBase(startOfWeekMonday(new Date()));
-                }}
+                onClick={goToThisWeek}
               >
                 이번 주
               </button>
               <button
                 className="c-ctl c-btn"
                 type="button"
-                onClick={() => {
-                  if (!canNext) return;
-                  setSelectedIdx(0);
-                  setWeekBase(addDays(monday, 7));
-                }}
+                onClick={() => navigateWeek(7)}
                 disabled={!canNext}
               >
                 다음 주
@@ -315,51 +520,14 @@ export default function StudentCalendar() {
             </div>
           </div>
 
-          {/* Summary (최종 결과만 소수 1자리 시간) */}
-          <div className="r-split" style={{ marginTop: 10 }}>
-            <div
-              className="u-panel"
-              style={{ padding: 12, background: "var(--bg-2)" }}
-            >
-              <div
-                style={{
-                  fontSize: 12,
-                  color: "var(--text-muted)",
-                  fontWeight: 800,
-                }}
-              >
-                기초 역량 강화
-              </div>
-              <div style={{ fontSize: 18, fontWeight: 900, marginTop: 4 }}>
-                {minutesToHoursDecimalText1(totals["기초 역량 강화"])}
-              </div>
-            </div>
-
-            <div
-              className="u-panel"
-              style={{ padding: 12, background: "var(--bg-2)" }}
-            >
-              <div
-                style={{
-                  fontSize: 12,
-                  color: "var(--text-muted)",
-                  fontWeight: 800,
-                }}
-              >
-                진로 탐색
-              </div>
-              <div style={{ fontSize: 18, fontWeight: 900, marginTop: 4 }}>
-                {minutesToHoursDecimalText1(totals["진로 탐색"])}
-              </div>
-            </div>
-          </div>
+          <WeeklySummary totals={totals} />
         </div>
       </div>
 
-      {/* Error */}
-      {error ? <div className="u-alert u-alert--error">{error}</div> : null}
+      {/* ── 전역 에러 ── */}
+      {fetchError && <div className="u-alert u-alert--error">{fetchError}</div>}
 
-      {/* Day tabs */}
+      {/* ── 요일 탭 ── */}
       <div
         className="u-panel"
         style={{
@@ -372,8 +540,8 @@ export default function StudentCalendar() {
         role="tablist"
         aria-label="week days"
       >
-        {weekDays.map((d, idx) => {
-          const iso = toISODate(d);
+        {weekDays.map((day, idx) => {
+          const iso = toISODate(day);
           const count = (eventsByDate.get(iso) ?? []).length;
           const active = idx === selectedIdx;
 
@@ -403,7 +571,7 @@ export default function StudentCalendar() {
               >
                 <div style={{ fontWeight: 900 }}>{DOW[idx]}</div>
                 <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                  {formatKoreanMD(d)}
+                  {formatKoreanMD(day)}
                 </div>
               </div>
               <div
@@ -420,7 +588,7 @@ export default function StudentCalendar() {
         })}
       </div>
 
-      {/* Selected day panel */}
+      {/* ── 선택된 날 패널 ── */}
       <div className="u-panel" style={{ padding: 14 }}>
         <div
           style={{
@@ -433,7 +601,7 @@ export default function StudentCalendar() {
           <div style={{ fontWeight: 900 }}>
             {DOW[selectedIdx]}요일 · {formatKoreanMD(selectedDate)}
           </div>
-          <button className="c-ctl c-btn" type="button" onClick={openAdd}>
+          <button className="c-ctl c-btn" type="button" onClick={openAddModal}>
             일정 추가
           </button>
         </div>
@@ -450,84 +618,18 @@ export default function StudentCalendar() {
           ) : (
             <div className="l-section">
               {selectedList.map((ev) => (
-                <div
+                <EventCard
                   key={ev.id}
-                  className="u-panel"
-                  style={{
-                    background: "var(--bg-2)",
-                    padding: 12,
-                    borderRadius: "var(--radius-2)",
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      gap: 10,
-                    }}
-                  >
-                    <div>
-                      <div
-                        style={{
-                          display: "flex",
-                          gap: 8,
-                          alignItems: "center",
-                          flexWrap: "wrap",
-                        }}
-                      >
-                        <span
-                          className="u-panel"
-                          style={{
-                            borderRadius: 999,
-                            padding: "2px 8px",
-                            fontSize: 12,
-                            background: "var(--bg-1)",
-                          }}
-                        >
-                          {ev.category}
-                        </span>
-
-                        <span
-                          style={{ fontSize: 12, color: "var(--text-muted)" }}
-                        >
-                          {minutesToHMText(ev.duration_min)}
-                        </span>
-                      </div>
-
-                      <div style={{ marginTop: 6, fontWeight: 900 }}>
-                        {ev.title}
-                      </div>
-                      {ev.description ? (
-                        <div
-                          style={{
-                            marginTop: 6,
-                            color: "var(--text-muted)",
-                            fontSize: 13,
-                            whiteSpace: "pre-wrap",
-                          }}
-                        >
-                          {ev.description}
-                        </div>
-                      ) : null}
-                    </div>
-
-                    <button
-                      className="c-ctl c-btn c-btn--danger"
-                      type="button"
-                      onClick={() => deleteEvent(ev.id)}
-                      style={{ height: "fit-content" }}
-                    >
-                      삭제
-                    </button>
-                  </div>
-                </div>
+                  event={ev}
+                  onDelete={handleDeleteEvent}
+                />
               ))}
             </div>
           )}
         </div>
       </div>
 
-      {/* Add modal */}
+      {/* ── 추가 모달 ── */}
       <Modal
         open={addOpen}
         title={`${DOW[selectedIdx]}요일 (${formatKoreanMD(
@@ -535,86 +637,14 @@ export default function StudentCalendar() {
         )}) 일정 추가`}
         onClose={() => setAddOpen(false)}
       >
-        <div className="l-section">
-          <div className="f-field">
-            <div className="f-label">카테고리</div>
-            <select
-              className="c-ctl c-input"
-              value={draft.category}
-              onChange={(e) =>
-                setDraft((p) => ({ ...p, category: e.target.value }))
-              }
-            >
-              {CATEGORIES.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="f-field">
-            <div className="f-label">내용</div>
-            <input
-              className="c-ctl c-input"
-              value={draft.title}
-              onChange={(e) =>
-                setDraft((p) => ({ ...p, title: e.target.value }))
-              }
-              placeholder="학습 내용"
-              autoFocus
-            />
-          </div>
-
-          <div className="f-field">
-            <div className="f-label">시간(분)</div>
-            <input
-              className="c-ctl c-input"
-              type="number"
-              min={1}
-              step={1}
-              inputMode="numeric"
-              value={draft.minutes}
-              onChange={(e) =>
-                setDraft((p) => ({ ...p, minutes: e.target.value }))
-              }
-              placeholder="60"
-            />
-            <div className="f-hint">예시: 30, 60</div>
-          </div>
-
-          <div className="f-field">
-            <div className="f-label">설명</div>
-            <textarea
-              className="c-ctl c-textarea"
-              value={draft.description}
-              onChange={(e) =>
-                setDraft((p) => ({ ...p, description: e.target.value }))
-              }
-              placeholder="자유 메모"
-              rows={3}
-            />
-          </div>
-
-          <div className="m-footer" style={{ padding: 0 }}>
-            <button
-              className="c-ctl c-btn"
-              type="button"
-              onClick={() => setAddOpen(false)}
-              disabled={saving}
-            >
-              취소
-            </button>
-            <button
-              className="c-ctl c-btn"
-              type="button"
-              onClick={addEvent}
-              disabled={saving}
-            >
-              {saving ? "저장중..." : "등록"}
-            </button>
-          </div>
-        </div>
+        <AddEventForm
+          draft={draft}
+          onChange={updateDraft}
+          onSubmit={handleAddEvent}
+          onCancel={() => setAddOpen(false)}
+          saving={saving}
+          error={formError}
+        />
       </Modal>
     </div>
   );

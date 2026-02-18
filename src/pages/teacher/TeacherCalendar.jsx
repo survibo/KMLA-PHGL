@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { supabase } from "../../lib/supabase";
 import {
@@ -9,658 +9,695 @@ import {
   toISODate,
 } from "../../features/week";
 
-const CATEGORIES = ["기초 역량 강화", "진로 탐색"];
-const DOW = ["월", "화", "수", "목", "금", "토", "일"];
+// ─── Constants ────────────────────────────────────────────────────────────────
 
-const ORDERS = {
-  STUDENT_NO: "student_no", // 학번순: student_no만
-  CLASS: "class", // 반순: class_no -> student_no
+const CATEGORIES = ["기초 역량 강화", "진로 탐색"];
+const DOW        = ["월", "화", "수", "목", "금", "토", "일"];
+
+const ORDER = {
+  STUDENT_NO: "student_no",
+  CLASS:      "class",
 };
 
-// 파일 상단 어디든
+const STATUS = {
+  IDLE:    "idle",
+  LOADING: "loading",
+  ERROR:   "error",
+};
+
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-function isUuid(v) {
-  return typeof v === "string" && UUID_RE.test(v);
-}
+// ─── Design tokens ────────────────────────────────────────────────────────────
 
-function minutesToHoursText(min) {
-  const h = (min ?? 0) / 60;
+const S = {
+  heading:   { fontSize: 17, fontWeight: 900, letterSpacing: "-0.3px", color: "var(--text-1)" },
+  subtext:   { fontSize: 13, color: "var(--text-muted)", lineHeight: 1.5 },
+  label:     { fontSize: 11, fontWeight: 800, letterSpacing: "0.6px", textTransform: "uppercase", color: "var(--text-muted)" },
+  card:      { padding: "14px 16px" },
+  cardInner: { padding: 12, background: "var(--bg-2)", borderRadius: 10, border: "1px solid var(--border-subtle)" },
+  thisWeekBadge: {
+    display: "inline-flex", alignItems: "center", gap: 5,
+    fontSize: 12, fontWeight: 900, color: "#166534",
+    background: "rgba(34,197,94,0.13)", border: "1px solid rgba(34,197,94,0.28)",
+    padding: "2px 9px", borderRadius: 999,
+  },
+  notThisWeek: { fontSize: 13, color: "var(--text-muted)" },
+  row:       { display: "flex", alignItems: "center", gap: 8 },
+  rowSpread: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" },
+  btnGroup:  { display: "flex", gap: 6, flexWrap: "wrap" },
+  divider:   { height: 1, background: "var(--border-subtle)", margin: "2px 0" },
+};
+
+const FADE = { transition: "opacity 150ms ease" };
+
+const dimWhen = (active) => ({
+  ...FADE,
+  opacity:       active ? 0.35 : 1,
+  pointerEvents: active ? "none" : "auto",
+});
+
+// ─── Pure helpers ─────────────────────────────────────────────────────────────
+
+const isUuid = (v) => typeof v === "string" && UUID_RE.test(v);
+
+const clamp = (v, min, max) => Math.min(Math.max(v, min), max);
+
+const parseWeekParam = (raw) => {
+  if (!raw) return toISODate(startOfWeekMonday(new Date()));
+  const d = new Date(raw);
+  return isNaN(d) ? toISODate(startOfWeekMonday(new Date())) : toISODate(startOfWeekMonday(d));
+};
+
+const parseDayParam = (raw, max = 6) => {
+  const n = parseInt(raw, 10);
+  return isNaN(n) ? 0 : clamp(n, 0, max);
+};
+
+const formatMinutesAsDecimalHours = (totalMinutes) => {
+  const h = (totalMinutes ?? 0) / 60;
   return Number.isInteger(h) ? `${h}시간` : `${h.toFixed(1)}시간`;
+};
+
+const formatMinutesAsHoursAndMinutes = (totalMinutes) => {
+  const total = totalMinutes ?? 0;
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  if (h === 0) return `${m}분`;
+  if (m === 0) return `${h}시간`;
+  return `${h}시간 ${m}분`;
+};
+
+const compareNullableNum = (a, b) => {
+  if (a == null && b == null) return 0;
+  if (a == null) return 1;
+  if (b == null) return -1;
+  return a - b;
+};
+
+const compareByName = (a, b) =>
+  String(a.name ?? "").localeCompare(String(b.name ?? ""));
+
+// ─── Sort strategies ──────────────────────────────────────────────────────────
+
+const sortByStudentNo = (a, b) =>
+  compareNullableNum(a.student_no, b.student_no) ||
+  compareNullableNum(a.class_no,   b.class_no)   ||
+  compareByName(a, b);
+
+const sortByClass = (a, b) =>
+  compareNullableNum(a.class_no,   b.class_no)   ||
+  compareNullableNum(a.student_no, b.student_no) ||
+  compareByName(a, b);
+
+const SORT_FN = {
+  [ORDER.STUDENT_NO]: sortByStudentNo,
+  [ORDER.CLASS]:      sortByClass,
+};
+
+// ─── Supabase API ─────────────────────────────────────────────────────────────
+
+async function fetchStudents() {
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id, name, grade, class_no, student_no, approved, role")
+    .eq("role", "student");
+  if (error) throw new Error(error.message);
+  return data ?? [];
 }
 
-function compareNum(a, b) {
-  const va = a ?? null;
-  const vb = b ?? null;
-  if (va == null && vb == null) return 0;
-  if (va == null) return 1;
-  if (vb == null) return -1;
-  return va - vb;
+async function fetchWeekEvents({ studentId, weekStartISO, weekEndISO }) {
+  const { data, error } = await supabase
+    .from("events")
+    .select("id, owner_id, title, description, category, date, duration_min, created_at")
+    .eq("owner_id", studentId)
+    .gte("date", weekStartISO)
+    .lte("date", weekEndISO)
+    .order("date",       { ascending: true })
+    .order("created_at", { ascending: true });
+  if (error) throw new Error(error.message);
+  return data ?? [];
 }
 
-export default function TeacherCalendar() {
+// ─── Reducers ─────────────────────────────────────────────────────────────────
+
+const studentsInitial = { status: STATUS.LOADING, data: [], error: "" };
+
+function studentsReducer(state, action) {
+  switch (action.type) {
+    case "LOADING": return { ...state,              status: STATUS.LOADING, error: "" };
+    case "SUCCESS": return { status: STATUS.IDLE,   data: action.payload,  error: "" };
+    case "ERROR":   return { status: STATUS.ERROR,  data: [],              error: action.payload };
+    default:        return state;
+  }
+}
+
+// stale = 마지막 성공 데이터. 로딩·에러 중에도 이전 데이터를 UI에 유지.
+const eventsInitial = { status: STATUS.IDLE, live: [], stale: [] };
+
+function eventsReducer(state, action) {
+  switch (action.type) {
+    case "LOADING": return { ...state,             status: STATUS.LOADING };
+    case "SUCCESS": return { status: STATUS.IDLE,  live: action.payload, stale: action.payload };
+    case "ERROR":   return { ...state,             status: STATUS.ERROR };
+    case "RESET":   return eventsInitial;
+    default:        return state;
+  }
+}
+
+// ─── Custom hooks ─────────────────────────────────────────────────────────────
+
+function useStudents() {
+  const [state, dispatch] = useReducer(studentsReducer, studentsInitial);
+
+  useEffect(() => {
+    let cancelled = false;
+    dispatch({ type: "LOADING" });
+    fetchStudents()
+      .then((data) => { if (!cancelled) dispatch({ type: "SUCCESS", payload: data }); })
+      .catch((err)  => { if (!cancelled) dispatch({ type: "ERROR",   payload: err.message }); });
+    return () => { cancelled = true; };
+  }, []);
+
+  return state;
+}
+
+function useWeekEvents({ studentId, weekStartISO, weekEndISO, enabled }) {
+  const [state, dispatch] = useReducer(eventsReducer, eventsInitial);
+  const cancelRef = useRef(null);
+
+  useEffect(() => {
+    if (!enabled || !isUuid(studentId)) {
+      dispatch({ type: "RESET" });
+      return;
+    }
+
+    cancelRef.current?.();
+    let cancelled = false;
+    cancelRef.current = () => { cancelled = true; };
+
+    dispatch({ type: "LOADING" });
+
+    fetchWeekEvents({ studentId, weekStartISO, weekEndISO })
+      .then((data) => { if (!cancelled) dispatch({ type: "SUCCESS", payload: data }); })
+      .catch(()    => { if (!cancelled) dispatch({ type: "ERROR" }); });
+
+    return () => { cancelRef.current?.(); };
+  }, [studentId, weekStartISO, weekEndISO, enabled]);
+
+  return state;
+}
+
+// URL searchParams를 단일 진실 공급원으로 사용.
+// 모든 파생값과 액션을 여기서 관리하므로 CalendarView는 순수하게 렌더만 담당.
+function useTeacherCalendarState({ studentId, students }) {
   const navigate = useNavigate();
-  const { studentId } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  // 정렬 모드: query로 유지 (새로고침/공유 안정)
-  const order = useMemo(() => {
-    const q = searchParams.get("order");
-    if (q === ORDERS.CLASS) return ORDERS.CLASS;
-    return ORDERS.STUDENT_NO;
-  }, [searchParams]);
+  const order      = searchParams.get("order") === ORDER.CLASS ? ORDER.CLASS : ORDER.STUDENT_NO;
+  const weekStart  = parseWeekParam(searchParams.get("week"));
+  const selectedIdx = parseDayParam(searchParams.get("day"));
 
-  const [studentsLoading, setStudentsLoading] = useState(true);
-  const [studentsError, setStudentsError] = useState("");
-  const [students, setStudents] = useState([]);
+  const monday = useMemo(() => startOfWeekMonday(new Date(weekStart)), [weekStart]);
 
-  const [weekBase, setWeekBase] = useState(() => startOfWeekMonday(new Date()));
-  const monday = useMemo(() => startOfWeekMonday(weekBase), [weekBase]);
   const weekDays = useMemo(
     () => Array.from({ length: 7 }, (_, i) => addDays(monday, i)),
     [monday]
   );
 
-  const [selectedIdx, setSelectedIdx] = useState(0);
+  const isThisWeek = useMemo(
+    () => weekStart === toISODate(startOfWeekMonday(new Date())),
+    [weekStart]
+  );
 
-  useEffect(() => {
-    setSelectedIdx(0);
-  }, [toISODate(monday)]);
+  const sortedStudents = useMemo(
+    () => [...students].sort(SORT_FN[order] ?? sortByStudentNo),
+    [students, order]
+  );
 
-  const selectedDate = weekDays[selectedIdx];
-  const selectedISO = toISODate(selectedDate);
-  const weekStartISO = toISODate(monday);
-  const weekEndISO = toISODate(addDays(monday, 6));
+  const currentIndex = useMemo(
+    () => sortedStudents.findIndex((s) => s.id === studentId),
+    [sortedStudents, studentId]
+  );
 
-  // 학생 목록 1회 로드 (전체학생 기준 순회)
-  useEffect(() => {
-    const loadStudents = async () => {
-      setStudentsLoading(true);
-      setStudentsError("");
+  // ── URL 업데이트 헬퍼 ──────────────────────────────────────────────────────
 
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("id, name, grade, class_no, student_no, approved, role")
-        .eq("role", "student");
-
-      if (error) {
-        setStudentsError(error.message);
-        setStudents([]);
-      } else {
-        setStudents(data ?? []);
-      }
-
-      setStudentsLoading(false);
-    };
-
-    loadStudents();
-  }, []);
-
-  const sortedStudents = useMemo(() => {
-    const list = [...students];
-
-    if (order === ORDERS.STUDENT_NO) {
-      list.sort((a, b) => {
-        const c = compareNum(a.student_no, b.student_no);
-        if (c !== 0) return c;
-        // fallback(거의 안 탐): class/name
-        const c2 = compareNum(a.class_no, b.class_no);
-        if (c2 !== 0) return c2;
-        return String(a.name ?? "").localeCompare(String(b.name ?? ""));
-      });
-      return list;
-    }
-
-    // 반순: class_no -> student_no
-    list.sort((a, b) => {
-      const c1 = compareNum(a.class_no, b.class_no);
-      if (c1 !== 0) return c1;
-      const c2 = compareNum(a.student_no, b.student_no);
-      if (c2 !== 0) return c2;
-      return String(a.name ?? "").localeCompare(String(b.name ?? ""));
-    });
-    return list;
-  }, [students, order]);
-
-  const currentIndex = useMemo(() => {
-    if (!studentId) return -1;
-    return sortedStudents.findIndex((s) => s.id === studentId);
-  }, [sortedStudents, studentId]);
-
-  const currentStudent = useMemo(() => {
-    if (currentIndex < 0) return null;
-    return sortedStudents[currentIndex];
-  }, [sortedStudents, currentIndex]);
-
-  // studentId가 없거나(이상 케이스) / 목록에 없으면 첫 학생으로 보내기
-  useEffect(() => {
-    if (studentsLoading) return;
-    if (studentsError) return;
-    if (!sortedStudents.length) return;
-
-    if (!isUuid(studentId) || currentIndex < 0) {
-      const first = sortedStudents[0];
-      navigate(`/teacher/calendar/${first.id}?order=${order}`, {
-        replace: true,
-      });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    studentsLoading,
-    studentsError,
-    sortedStudents.length,
-    studentId,
-    currentIndex,
-    order,
-  ]);
-
-  function goPrevStudent() {
-    if (currentIndex <= 0) return;
-    const prev = sortedStudents[currentIndex - 1];
-    navigate(`/teacher/calendar/${prev.id}?order=${order}`);
-  }
-
-  function goNextStudent() {
-    if (currentIndex < 0) return;
-    if (currentIndex >= sortedStudents.length - 1) return;
-    const next = sortedStudents[currentIndex + 1];
-    navigate(`/teacher/calendar/${next.id}?order=${order}`);
-  }
-
-  function setOrder(nextOrder) {
-    // 현재 studentId 유지 + order만 교체
+  const setParam = useCallback((key, value) => {
     setSearchParams((prev) => {
       const p = new URLSearchParams(prev);
-      p.set("order", nextOrder);
+      p.set(key, value);
       return p;
     });
-  }
+  }, [setSearchParams]);
 
-  // --- Events (read-only) ---
-  const [events, setEvents] = useState([]);
-  const [fetching, setFetching] = useState(true);
-  const [error, setError] = useState("");
+  // 주 이동 시 선택 요일은 항상 월요일(0)으로 리셋
+  const setWeekAndResetDay = useCallback((isoDate) => {
+    setSearchParams((prev) => {
+      const p = new URLSearchParams(prev);
+      p.set("week", isoDate);
+      p.set("day", "0");
+      return p;
+    });
+  }, [setSearchParams]);
 
-  async function fetchWeek(targetId) {
-    if (!targetId) return;
+  // ── 학생 네비게이션 ────────────────────────────────────────────────────────
 
-    setFetching(true);
-    setError("");
+  const navigateToStudent = useCallback((idx) => {
+    navigate(
+      `/teacher/calendar/${sortedStudents[idx].id}?order=${order}&week=${weekStart}&day=0`
+    );
+  }, [navigate, sortedStudents, order, weekStart]);
 
-    const { data, error } = await supabase
-      .from("events")
-      .select(
-        "id, owner_id, title, description, category, date, duration_min, created_at"
-      )
-      .eq("owner_id", targetId)
-      .gte("date", weekStartISO)
-      .lte("date", weekEndISO)
-      .order("date", { ascending: true })
-      .order("created_at", { ascending: true });
-
-    if (error) {
-      setError(error.message);
-      setEvents([]);
-      setFetching(false);
-      return;
-    }
-
-    setEvents(data ?? []);
-    setFetching(false);
-  }
-
-  // 학생/주 변경 시 fetch
+  // 유효하지 않은 studentId → 정렬 기준 첫 번째 학생으로 리다이렉트
   useEffect(() => {
-    if (!isUuid(studentId)) return;
-    if (studentsLoading) return;
-    if (studentsError) return;
-    fetchWeek(studentId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [studentId, weekStartISO, weekEndISO, studentsLoading, studentsError]);
-
-  const eventsByDate = useMemo(() => {
-    const map = new Map();
-    for (const d of weekDays) map.set(toISODate(d), []);
-    for (const ev of events) {
-      const key = ev.date;
-      if (!map.has(key)) map.set(key, []);
-      map.get(key).push(ev);
+    if (!sortedStudents.length) return;
+    if (!isUuid(studentId) || currentIndex < 0) {
+      navigate(
+        `/teacher/calendar/${sortedStudents[0].id}?order=${order}&week=${weekStart}&day=0`,
+        { replace: true }
+      );
     }
-    return map;
-  }, [events, weekDays]);
+  }, [sortedStudents, studentId, currentIndex, order, weekStart, navigate]);
 
-  const totals = useMemo(() => {
-    const base = { "기초 역량 강화": 0, "진로 탐색": 0 };
-    for (const ev of events) {
-      if (base[ev.category] !== undefined)
-        base[ev.category] += ev.duration_min || 0;
-    }
-    return base;
-  }, [events]);
+  return {
+    order, monday, weekStart, weekDays, isThisWeek, selectedIdx,
+    sortedStudents, currentIndex, currentStudent: sortedStudents[currentIndex] ?? null,
+    setOrder:        (v) => setParam("order", v),
+    setSelectedIdx:  (i) => setParam("day", i),
+    goPrevWeek:      () => setWeekAndResetDay(toISODate(addDays(monday, -7))),
+    goNextWeek:      () => setWeekAndResetDay(toISODate(addDays(monday,  7))),
+    goToCurrentWeek: () => setWeekAndResetDay(toISODate(startOfWeekMonday(new Date()))),
+    goPrevStudent:   () => { if (currentIndex > 0) navigateToStudent(currentIndex - 1); },
+    goNextStudent:   () => {
+      if (currentIndex >= 0 && currentIndex < sortedStudents.length - 1)
+        navigateToStudent(currentIndex + 1);
+    },
+  };
+}
 
-  const selectedList = useMemo(() => {
-    return eventsByDate.get(selectedISO) ?? [];
-  }, [eventsByDate, selectedISO]);
+// ─── Sub-components ───────────────────────────────────────────────────────────
 
-  // --- UI states ---
-  if (studentsLoading) {
-    return (
-      <div className="l-page">
-        <div className="u-panel" style={{ padding: 14 }}>
-          학생 목록 불러오는 중…
-        </div>
-      </div>
-    );
-  }
-
-  if (studentsError) {
-    return (
-      <div className="l-page">
-        <div className="u-alert u-alert--error">오류: {studentsError}</div>
-      </div>
-    );
-  }
-
-  if (!sortedStudents.length) {
-    return (
-      <div className="l-page">
-        <div className="u-panel" style={{ padding: 14 }}>
-          학생이 없습니다.
-        </div>
-      </div>
-    );
-  }
+function WeeklySummary({ events, status }) {
+  const totals = useMemo(
+    () => Object.fromEntries(
+      CATEGORIES.map((cat) => [
+        cat,
+        events
+          .filter((ev) => ev.category === cat)
+          .reduce((sum, ev) => sum + (ev.duration_min ?? 0), 0),
+      ])
+    ),
+    [events]
+  );
 
   return (
-    <div className="l-page">
-      {/* Header: 학생 식별 + 좌우 네비 + 정렬 */}
-      <div className="u-panel" style={{ padding: 14 }}>
-        <div className="l-section" style={{ gap: 10 }}>
+    <div className="r-split" style={{ marginTop: 4, ...dimWhen(status === STATUS.LOADING) }}>
+      {CATEGORIES.map((cat) => {
+        const minutes = totals[cat] ?? 0;
+        const isEmpty = minutes === 0;
+        return (
           <div
+            key={cat}
             style={{
-              display: "flex",
-              justifyContent: "space-between",
-              gap: 10,
-              flexWrap: "wrap",
-              alignItems: "flex-start",
+              ...S.cardInner,
+              display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8,
+              opacity: isEmpty ? 0.55 : 1,
             }}
           >
-            <div>
-              <div style={{ fontSize: 18, fontWeight: 900 }}>
-                학생 주간 학습 (읽기 전용)
-              </div>
-              <div
-                style={{
-                  marginTop: 4,
-                  fontSize: 13,
-                  color: "var(--text-muted)",
-                }}
-              >
-                {currentStudent ? (
-                  <>
-                    <b style={{ color: "var(--text-1)" }}>
-                      {currentStudent.name ?? "이름없음"}
-                    </b>
-                    {" · "}반 {currentStudent.class_no ?? "-"} / 번호{" "}
-                    {currentStudent.student_no ?? "-"}
-                    {" · "}
-                    {currentIndex >= 0
-                      ? `${currentIndex + 1} / ${sortedStudents.length}`
-                      : `- / ${sortedStudents.length}`}
-                  </>
-                ) : (
-                  "학생 정보를 찾는 중…"
-                )}
-              </div>
-            </div>
-
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button
-                type="button"
-                className="c-ctl c-btn"
-                onClick={goPrevStudent}
-                disabled={currentIndex <= 0}
-                title="이전 학생"
-                style={{
-                  fontWeight: 900,
-                  opacity: currentIndex <= 0 ? 0.6 : 1,
-                }}
-              >
-                ← 이전 학생
-              </button>
-
-              <button
-                type="button"
-                className="c-ctl c-btn"
-                onClick={goNextStudent}
-                disabled={
-                  currentIndex < 0 || currentIndex >= sortedStudents.length - 1
-                }
-                title="다음 학생"
-                style={{
-                  fontWeight: 900,
-                  opacity:
-                    currentIndex < 0 ||
-                    currentIndex >= sortedStudents.length - 1
-                      ? 0.6
-                      : 1,
-                }}
-              >
-                다음 학생 →
-              </button>
-            </div>
+            <span style={S.label}>{cat}</span>
+            <span style={{
+              fontSize: 20, fontWeight: 900, letterSpacing: "-0.5px",
+              color: isEmpty ? "var(--text-muted)" : "var(--text-1)",
+              fontVariantNumeric: "tabular-nums",
+            }}>
+              {formatMinutesAsDecimalHours(minutes)}
+            </span>
           </div>
+        );
+      })}
+    </div>
+  );
+}
 
-          <div className="r-split">
-            <div className="f-field">
-              <div className="f-label">정렬</div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <button
-                  type="button"
-                  className="c-ctl c-btn"
-                  onClick={() => setOrder(ORDERS.STUDENT_NO)}
-                  style={{
-                    fontWeight: 900,
-                    background:
-                      order === ORDERS.STUDENT_NO
-                        ? "var(--bg-2)"
-                        : "var(--bg-1)",
-                    borderColor:
-                      order === ORDERS.STUDENT_NO
-                        ? "var(--border-focus)"
-                        : "var(--border-subtle)",
-                  }}
-                >
-                  학번순
-                </button>
-                <button
-                  type="button"
-                  className="c-ctl c-btn"
-                  onClick={() => setOrder(ORDERS.CLASS)}
-                  style={{
-                    fontWeight: 900,
-                    background:
-                      order === ORDERS.CLASS ? "var(--bg-2)" : "var(--bg-1)",
-                    borderColor:
-                      order === ORDERS.CLASS
-                        ? "var(--border-focus)"
-                        : "var(--border-subtle)",
-                  }}
-                >
-                  반순
-                </button>
-              </div>
-              <div className="f-hint">
-                * 학번순: student_no / 반순: class_no → student_no
-              </div>
-            </div>
-
-            <div className="f-field">
-              <div className="f-label">주간 범위</div>
-              <div style={{ fontSize: 13, fontWeight: 900 }}>
-                {formatWeekRange(monday)}
-              </div>
-              <div className="f-hint">* 주 이동은 아래 버튼을 사용</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Week controls + summary */}
-      <div className="u-panel" style={{ padding: 14 }}>
-        <div className="l-section" style={{ gap: 6 }}>
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              gap: 10,
-              flexWrap: "wrap",
-              alignItems: "center",
-            }}
-          >
-            <div>
-              <div style={{ fontSize: 18, fontWeight: 900 }}>주간 학습</div>
-              <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
-                {formatWeekRange(monday)}
-              </div>
-            </div>
-
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button
-                className="c-ctl c-btn"
-                type="button"
-                onClick={() => setWeekBase(addDays(monday, -7))}
-              >
-                이전 주
-              </button>
-              <button
-                className="c-ctl c-btn"
-                type="button"
-                onClick={() => setWeekBase(startOfWeekMonday(new Date()))}
-              >
-                이번 주
-              </button>
-              <button
-                className="c-ctl c-btn"
-                type="button"
-                onClick={() => setWeekBase(addDays(monday, 7))}
-              >
-                다음 주
-              </button>
-            </div>
-          </div>
-
-          <div className="r-split" style={{ marginTop: 10 }}>
-            <div
-              className="u-panel"
-              style={{ padding: 12, background: "var(--bg-2)" }}
-            >
-              <div
-                style={{
-                  fontSize: 12,
-                  color: "var(--text-muted)",
-                  fontWeight: 800,
-                }}
-              >
-                기초 역량 강화
-              </div>
-              <div style={{ fontSize: 18, fontWeight: 900, marginTop: 4 }}>
-                {minutesToHoursText(totals["기초 역량 강화"])}
-              </div>
-            </div>
-
-            <div
-              className="u-panel"
-              style={{ padding: 12, background: "var(--bg-2)" }}
-            >
-              <div
-                style={{
-                  fontSize: 12,
-                  color: "var(--text-muted)",
-                  fontWeight: 800,
-                }}
-              >
-                진로 탐색
-              </div>
-              <div style={{ fontSize: 18, fontWeight: 900, marginTop: 4 }}>
-                {minutesToHoursText(totals["진로 탐색"])}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Error */}
-      {error ? (
-        <div className="u-alert u-alert--error">오류: {error}</div>
-      ) : null}
-
-      {/* Day tabs */}
-      <div
-        className="u-panel"
-        style={{
-          padding: 10,
-          background: "var(--bg-1)",
-          overflowX: "auto",
-          display: "flex",
-          gap: 8,
-        }}
-        role="tablist"
-        aria-label="week days"
-      >
-        {weekDays.map((d, idx) => {
-          const iso = toISODate(d);
-          const count = (eventsByDate.get(iso) ?? []).length;
-          const active = idx === selectedIdx;
-
+function OrderToggle({ order, onChange }) {
+  const OPTIONS = [
+    { label: "학번순", value: ORDER.STUDENT_NO },
+    { label: "반순",   value: ORDER.CLASS },
+  ];
+  return (
+    <div className="f-field">
+      <div className="f-label">정렬</div>
+      <div style={S.btnGroup}>
+        {OPTIONS.map(({ label, value }) => {
+          const active = order === value;
           return (
             <button
-              key={iso}
-              type="button"
-              role="tab"
-              aria-selected={active}
-              onClick={() => setSelectedIdx(idx)}
-              className="c-ctl c-btn"
+              key={value} type="button" className="c-ctl c-btn"
+              onClick={() => onChange(value)}
               style={{
-                minWidth: 92,
-                background: active ? "var(--bg-2)" : "var(--bg-1)",
-                borderColor: active
-                  ? "var(--border-focus)"
-                  : "var(--border-subtle)",
+                fontWeight: 900, fontSize: 13,
+                background:  active ? "var(--bg-2)"         : "var(--bg-1)",
+                borderColor: active ? "var(--border-focus)" : "var(--border-subtle)",
               }}
             >
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  gap: 8,
-                  width: "100%",
-                }}
-              >
-                <div style={{ fontWeight: 900 }}>{DOW[idx]}</div>
-                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                  {formatKoreanMD(d)}
-                </div>
-              </div>
-              <div
-                style={{
-                  marginTop: 6,
-                  fontSize: 12,
-                  color: "var(--text-muted)",
-                }}
-              >
-                {count}건
-              </div>
+              {label}
             </button>
           );
         })}
       </div>
+    </div>
+  );
+}
 
-      {/* Selected day panel */}
-      <div className="u-panel" style={{ padding: 14 }}>
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            gap: 10,
-            alignItems: "center",
-          }}
-        >
-          <div style={{ fontWeight: 900 }}>
-            {DOW[selectedIdx]}요일 · {formatKoreanMD(selectedDate)}
-          </div>
-          <div
-            style={{
-              fontSize: 12,
-              color: "var(--text-muted)",
-              fontWeight: 800,
-            }}
-          >
-            읽기 전용
-          </div>
+function CategoryBadge({ category }) {
+  return (
+    <span style={{
+      display: "inline-block", fontSize: 11, fontWeight: 800, letterSpacing: "0.3px",
+      padding: "3px 9px", borderRadius: 999,
+      background: "var(--bg-1)", border: "1px solid var(--border-subtle)", color: "var(--text-2)",
+    }}>
+      {category}
+    </span>
+  );
+}
+
+function EventCard({ event }) {
+  return (
+    <div style={{ ...S.cardInner, display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ ...S.row, justifyContent: "space-between" }}>
+        <CategoryBadge category={event.category} />
+        <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)", fontVariantNumeric: "tabular-nums" }}>
+          {formatMinutesAsHoursAndMinutes(event.duration_min)}
+        </span>
+      </div>
+      <div style={{ fontSize: 14, fontWeight: 900, color: "var(--text-1)", lineHeight: 1.4 }}>
+        {event.title}
+      </div>
+      {event.description && (
+        <div style={{
+          fontSize: 13, color: "var(--text-muted)", lineHeight: 1.6,
+          whiteSpace: "pre-wrap", borderTop: "1px solid var(--border-subtle)", paddingTop: 8,
+        }}>
+          {event.description}
         </div>
+      )}
+    </div>
+  );
+}
 
-        <div style={{ marginTop: 12 }}>
-          {fetching ? (
-            <div style={{ color: "var(--text-muted)", fontSize: 13 }}>
-              불러오는 중...
-            </div>
-          ) : selectedList.length === 0 ? (
-            <div style={{ color: "var(--text-muted)", fontSize: 13 }}>
-              등록된 학습 없음
-            </div>
+function StudentHeader({ student, index, total, onPrev, onNext }) {
+  return (
+    <div style={S.rowSpread}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <div style={S.heading}>학생 주간 학습</div>
+        <div style={{ ...S.subtext, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+          {student ? (
+            <>
+              <span style={{
+                fontSize: 11, fontWeight: 800, padding: "1px 7px", borderRadius: 999,
+                background: "var(--bg-2)", border: "1px solid var(--border-subtle)",
+                color: "var(--text-muted)", letterSpacing: "0.3px",
+              }}>
+                읽기 전용
+              </span>
+              <span style={{ color: "var(--border-subtle)" }}>·</span>
+              <b style={{ color: "var(--text-1)", fontWeight: 900 }}>{student.name ?? "이름없음"}</b>
+              <span style={{ color: "var(--border-subtle)" }}>·</span>
+              <span>{student.class_no ?? "-"}반 {student.student_no ?? "-"}번</span>
+              <span style={{ color: "var(--border-subtle)" }}>·</span>
+              <span>{index >= 0 ? `${index + 1} / ${total}명` : `- / ${total}명`}</span>
+            </>
           ) : (
-            <div className="l-section">
-              {selectedList.map((ev) => (
-                <div
-                  key={ev.id}
-                  className="u-panel"
-                  style={{
-                    background: "var(--bg-2)",
-                    padding: 12,
-                    borderRadius: "var(--radius-2)",
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      gap: 10,
-                    }}
-                  >
-                    <div>
-                      <div
-                        style={{
-                          display: "flex",
-                          gap: 8,
-                          alignItems: "center",
-                          flexWrap: "wrap",
-                        }}
-                      >
-                        <span
-                          className="u-panel"
-                          style={{
-                            borderRadius: 999,
-                            padding: "2px 8px",
-                            fontSize: 12,
-                            background: "var(--bg-1)",
-                          }}
-                        >
-                          {ev.category}
-                        </span>
-                        <span
-                          style={{ fontSize: 12, color: "var(--text-muted)" }}
-                        >
-                          {minutesToHoursText(ev.duration_min)}
-                        </span>
-                      </div>
-
-                      <div style={{ marginTop: 6, fontWeight: 900 }}>
-                        {ev.title}
-                      </div>
-                      {ev.description ? (
-                        <div
-                          style={{
-                            marginTop: 6,
-                            color: "var(--text-muted)",
-                            fontSize: 13,
-                            whiteSpace: "pre-wrap",
-                          }}
-                        >
-                          {ev.description}
-                        </div>
-                      ) : null}
-                    </div>
-
-                    {/* 읽기 전용: 액션 없음 */}
-                  </div>
-                </div>
-              ))}
-            </div>
+            <span>학생 정보를 찾는 중…</span>
           )}
         </div>
       </div>
+      <div style={S.btnGroup}>
+        <button type="button" className="c-ctl c-btn" onClick={onPrev} disabled={index <= 0}
+          style={{ fontSize: 13, fontWeight: 900 }}>← 이전</button>
+        <button type="button" className="c-ctl c-btn" onClick={onNext}
+          disabled={index < 0 || index >= total - 1}
+          style={{ fontSize: 13, fontWeight: 900 }}>다음 →</button>
+      </div>
     </div>
   );
+}
+
+function WeekNavBar({ monday, isThisWeek, onPrev, onCurrent, onNext }) {
+  return (
+    <div style={S.rowSpread}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+        <div style={S.heading}>주간 학습</div>
+        {isThisWeek ? (
+          <div style={S.thisWeekBadge}>
+            <span style={{ fontSize: 10 }}>●</span>
+            {formatWeekRange(monday)} · 이번 주
+          </div>
+        ) : (
+          <div style={S.notThisWeek}>{formatWeekRange(monday)}</div>
+        )}
+      </div>
+      <div style={S.btnGroup}>
+        <button className="c-ctl c-btn" type="button" onClick={onPrev}
+          style={{ fontSize: 13, fontWeight: 900 }}>이전 주</button>
+        <button className="c-ctl c-btn" type="button" onClick={onCurrent} disabled={isThisWeek}
+          style={{ fontSize: 13, fontWeight: 900, opacity: isThisWeek ? 0.45 : 1 }}>
+          이번 주
+        </button>
+        <button className="c-ctl c-btn" type="button" onClick={onNext}
+          style={{ fontSize: 13, fontWeight: 900 }}>다음 주</button>
+      </div>
+    </div>
+  );
+}
+
+function DayTab({ day, dow, count, active, onClick }) {
+  const hasEvents = count > 0;
+  return (
+    <button
+      type="button" role="tab" aria-selected={active} onClick={onClick}
+      className="c-ctl c-btn"
+      style={{
+        minWidth: 80, flexShrink: 0,
+        background:  active ? "var(--bg-2)"         : "var(--bg-1)",
+        borderColor: active ? "var(--border-focus)" : "var(--border-subtle)",
+        padding: "10px 12px",
+        display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
+      }}
+    >
+      <span style={{ fontSize: 13, fontWeight: 900, color: active ? "var(--text-1)" : "var(--text-2)" }}>
+        {dow}
+      </span>
+      <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+        {formatKoreanMD(day)}
+      </span>
+      <span style={{
+        marginTop: 2, fontSize: 11, fontWeight: 800,
+        padding: "1px 7px", borderRadius: 999, minWidth: 28, textAlign: "center",
+        background: hasEvents ? (active ? "var(--text-1)" : "var(--bg-3)") : "transparent",
+        color:      hasEvents ? (active ? "var(--bg-1)"   : "var(--text-2)") : "var(--text-muted)",
+        border:     hasEvents ? "none" : "1px dashed var(--border-subtle)",
+      }}>
+        {hasEvents ? `${count}건` : "없음"}
+      </span>
+    </button>
+  );
+}
+
+function StatusBadge({ status }) {
+  if (status === STATUS.IDLE) return null;
+  const isError = status === STATUS.ERROR;
+  return (
+    <span style={{
+      marginLeft: "auto", fontSize: 11, fontWeight: 800, letterSpacing: "0.2px",
+      padding: "2px 8px", borderRadius: 999,
+      color:      isError ? "var(--accent-danger)"    : "var(--text-muted)",
+      background: isError ? "var(--accent-danger-bg)" : "transparent",
+      border:     isError ? "1px solid var(--accent-danger)" : "none",
+      ...FADE,
+    }}>
+      {isError ? "⚠ 갱신 실패 · 이전 데이터" : "업데이트 중…"}
+    </span>
+  );
+}
+
+function DayPanel({ dow, date, events, status }) {
+  return (
+    <div className="u-panel" style={S.card}>
+      <div style={{
+        ...S.row, marginBottom: 12, paddingBottom: 10,
+        borderBottom: "1px solid var(--border-subtle)",
+      }}>
+        <span style={{ fontSize: 15, fontWeight: 900 }}>{dow}요일</span>
+        <span style={{ color: "var(--border-subtle)" }}>·</span>
+        <span style={S.subtext}>{formatKoreanMD(date)}</span>
+        <StatusBadge status={status} />
+      </div>
+      <div style={dimWhen(status === STATUS.LOADING)}>
+        {events.length === 0 ? (
+          <div style={{
+            minHeight: 80,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            color: "var(--text-muted)", fontSize: 13,
+            borderRadius: 10, background: "var(--bg-2)",
+            border: "1px dashed var(--border-subtle)",
+          }}>
+            이 날에는 등록된 학습이 없습니다
+          </div>
+        ) : (
+          <div className="l-section">
+            {events.map((ev) => <EventCard key={ev.id} event={ev} />)}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Loading / Error / Empty screens ─────────────────────────────────────────
+
+function LoadingScreen() {
+  return (
+    <div className="l-page">
+      <div className="u-panel" style={{ ...S.card, color: "var(--text-muted)", fontSize: 13 }}>
+        학생 목록 불러오는 중…
+      </div>
+    </div>
+  );
+}
+
+function ErrorScreen({ message }) {
+  return (
+    <div className="l-page">
+      <div className="u-alert u-alert--error">오류: {message}</div>
+    </div>
+  );
+}
+
+function EmptyScreen() {
+  return (
+    <div className="l-page">
+      <div className="u-panel" style={{ ...S.card, color: "var(--text-muted)", fontSize: 13 }}>
+        등록된 학생이 없습니다.
+      </div>
+    </div>
+  );
+}
+
+// ─── CalendarView ─────────────────────────────────────────────────────────────
+// students가 준비된 이후에만 마운트됨.
+// 훅 호출 순서가 students 로딩 여부에 따라 달라지지 않도록 TeacherCalendar와 분리.
+
+function CalendarView({ studentId, students }) {
+  const {
+    order, monday, weekStart, weekDays, isThisWeek, selectedIdx,
+    sortedStudents, currentIndex, currentStudent,
+    setOrder, setSelectedIdx,
+    goPrevWeek, goNextWeek, goToCurrentWeek,
+    goPrevStudent, goNextStudent,
+  } = useTeacherCalendarState({ studentId, students });
+
+  const weekEndISO = toISODate(addDays(monday, 6));
+
+  const { stale: events, status: eventsStatus } = useWeekEvents({
+    studentId,
+    weekStartISO: weekStart,
+    weekEndISO,
+    enabled: isUuid(studentId),
+  });
+
+  const eventsByDate = useMemo(() => {
+    const map = new Map(weekDays.map((d) => [toISODate(d), []]));
+    for (const ev of events) map.get(ev.date)?.push(ev);
+    return map;
+  }, [events, weekDays]);
+
+  const selectedDate   = weekDays[selectedIdx];
+  const selectedEvents = eventsByDate.get(toISODate(selectedDate)) ?? [];
+
+  return (
+    <div className="l-page">
+
+      {/* ── 학생 헤더 ── */}
+      <div className="u-panel" style={S.card}>
+        <div className="l-section" style={{ gap: 12 }}>
+          <StudentHeader
+            student={currentStudent}
+            index={currentIndex}
+            total={sortedStudents.length}
+            onPrev={goPrevStudent}
+            onNext={goNextStudent}
+          />
+          <div style={S.divider} />
+          <div className="r-split">
+            <OrderToggle order={order} onChange={setOrder} />
+            <div className="f-field">
+              <div className="f-label">현재 주간 범위</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-2)" }}>
+                {formatWeekRange(monday)}
+              </div>
+              <div className="f-hint">아래에서 주를 이동할 수 있습니다</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── 주간 이동 + 요약 ── */}
+      <div className="u-panel" style={S.card}>
+        <div className="l-section" style={{ gap: 10 }}>
+          <WeekNavBar
+            monday={monday}
+            isThisWeek={isThisWeek}
+            onPrev={goPrevWeek}
+            onCurrent={goToCurrentWeek}
+            onNext={goNextWeek}
+          />
+          <WeeklySummary events={events} status={eventsStatus} />
+        </div>
+      </div>
+
+      {/* ── 요일 탭 ── */}
+      <div
+        className="u-panel"
+        style={{ padding: 10, overflowX: "auto", display: "flex", gap: 6 }}
+        role="tablist"
+        aria-label="week days"
+      >
+        {weekDays.map((day, idx) => (
+          <DayTab
+            key={toISODate(day)}
+            day={day}
+            dow={DOW[idx]}
+            count={(eventsByDate.get(toISODate(day)) ?? []).length}
+            active={idx === selectedIdx}
+            onClick={() => setSelectedIdx(idx)}
+          />
+        ))}
+      </div>
+
+      {/* ── 선택된 날 패널 ── */}
+      <DayPanel
+        dow={DOW[selectedIdx]}
+        date={selectedDate}
+        events={selectedEvents}
+        status={eventsStatus}
+      />
+
+    </div>
+  );
+}
+
+// ─── Entry point ──────────────────────────────────────────────────────────────
+// students 로딩이 끝나기 전에는 CalendarView를 마운트하지 않음.
+// 훅 호출 순서 불변 원칙을 지키면서 early return을 안전하게 처리.
+
+export default function TeacherCalendar() {
+  const { studentId } = useParams();
+  const { status, data: students, error } = useStudents();
+
+  if (status === STATUS.LOADING) return <LoadingScreen />;
+  if (status === STATUS.ERROR)   return <ErrorScreen message={error} />;
+  if (!students.length)          return <EmptyScreen />;
+
+  return <CalendarView studentId={studentId} students={students} />;
 }

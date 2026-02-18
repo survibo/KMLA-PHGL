@@ -14,7 +14,7 @@ import TeacherTeachers from "./pages/teacher/TeacherTeachers";
 import TeacherWeeklyAudit from "./pages/teacher/TeacherWeeklyAudit";
 
 import ProtectedRoute from "./components/ProtectedRoute";
-import Pending from "./pages/student/Pending";
+import Pending from "./pages/Pending";
 import StudentLayout from "./components/StudentLayout";
 import TeacherLayout from "./components/TeacherLayout";
 
