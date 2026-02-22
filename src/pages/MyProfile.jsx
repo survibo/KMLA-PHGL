@@ -63,8 +63,8 @@ export default function MyProfile() {
         >
           <div>
             <div style={{ fontSize: 18, fontWeight: 900 }}>내 정보</div>
-            <div style={{ marginTop: 4, fontSize: 13, color: "var(--text-muted)" }}>
-              프로필 정보를 확인/수정할 수 있습니다.
+            <div style={{ marginTop: 4, fontSize: 13, color: "var(--accent-danger)" }}>
+              자신의 이름, 기수, 행정반, 학번을 넣어주세요.
             </div>
           </div>
 

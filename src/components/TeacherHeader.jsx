@@ -1,14 +1,20 @@
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { useMyProfile } from "../hooks/useMyProfile";
 import { useTheme } from "../lib/useTheme";
 
-function Tab({ to, label }) {
+function Tab({ to, label, matchPath }) {
+  const location = useLocation(); // react-router-dom에서 import
+
+  const isActive = matchPath
+    ? location.pathname.startsWith(matchPath)
+    : location.pathname === to;
+
   return (
     <NavLink
       to={to}
       className="c-ctl c-btn"
-      style={({ isActive }) => ({
+      style={{
         minHeight: 40,
         padding: "8px 10px",
         fontWeight: 900,
@@ -16,7 +22,7 @@ function Tab({ to, label }) {
         borderColor: isActive ? "var(--border-focus)" : "var(--border-subtle)",
         textAlign: "center",
         whiteSpace: "nowrap",
-      })}
+      }}
     >
       {label}
     </NavLink>
@@ -77,12 +83,14 @@ export default function TeacherHeader() {
       </div>
 
       <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-                <Tab to="/teacher/students" label="학생 관리" />
-
-        <Tab to="/teacher/calendar/first" label="캘린더" />
+        <Tab to="/teacher/students" label="학생 관리" />
+        <Tab
+          to="/teacher/calendar/first"
+          matchPath="/teacher/calendar"
+          label="캘린더"
+        />
         <Tab to="/teacher/absences" label="결석" />
-                <Tab to="/teacher/weeklyaudit" label="주간 비교" />
-
+        <Tab to="/teacher/weeklyaudit" label="주간 비교" />
         <Tab to="/teacher/profile" label="내 정보" />
         <Tab to="/teacher/teachers" label="선생님 목록" />
       </div>
