@@ -30,12 +30,15 @@ export default function Login() {
           maxWidth: 420,
           width: "100%",
           alignSelf: "center",
+          marginBottom: 40,
         }}
       >
         <div className="l-section" style={{ alignItems: "center", gap: 14 }}>
           <div style={{ textAlign: "center" }}>
             <div style={{ fontSize: 22, fontWeight: 900 }}>로그인</div>
-            <div style={{ marginTop: 6, fontSize: 13, color: "var(--text-muted)" }}>
+            <div
+              style={{ marginTop: 6, fontSize: 13, color: "var(--text-muted)" }}
+            >
               Google 계정으로 로그인하세요
             </div>
           </div>

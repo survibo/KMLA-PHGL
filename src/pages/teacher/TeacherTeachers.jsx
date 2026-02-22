@@ -218,7 +218,7 @@ export default function TeacherTeachers() {
                   onChange={(e) => setIncludeRevoked(e.target.checked)}
                 />
                 <span style={{ fontSize: 13, fontWeight: 800, color: "var(--text-2)" }}>
-                  권한 박탈 포함
+                  기존 선생님 포함
                 </span>
               </label>
 
