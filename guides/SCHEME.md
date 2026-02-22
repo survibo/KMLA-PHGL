@@ -175,7 +175,7 @@ CREATE INDEX idx_absences_student_date ON public.absences(student_id, date);
 --     1. status 무조건 pending 고정 (클라이언트에서 approved 등 넣어도 무시)
 --     2. updated_at 자동 세팅
 --   UPDATE:
---     1. 학생이 status 변경 시도하면 차단 (Burp Suite 등으로 위조 방지)
+--     1. 학생이 status 변경 시도하면 차단
 --     2. status가 바뀌면 누가 언제 바꿨는지 status_updated_by/at 자동 기록
 --     3. updated_at 자동 갱신
 -- =====================================================
