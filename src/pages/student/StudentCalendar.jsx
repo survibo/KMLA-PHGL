@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import { useMyProfile } from "../../hooks/useMyProfile";
+import { useNetworkStatus } from "../../hooks/useNetworkStatus";
 import {
   addDays,
   formatKoreanMD,
@@ -310,6 +311,7 @@ function AddEventForm({ draft, onChange, onSubmit, onCancel, saving, error }) {
 export default function StudentCalendar() {
   const { session, loading } = useMyProfile();
   const uid = session?.user?.id;
+  const isOnline = useNetworkStatus();
 
   // ── 주 탐색 상태 ──
   const thisMonday = useMemo(() => startOfWeekMonday(new Date()), []);
@@ -523,6 +525,13 @@ export default function StudentCalendar() {
           <WeeklySummary totals={totals} />
         </div>
       </div>
+
+      {/* ── 오프라인 배너 ── */}
+      {!isOnline && (
+        <div className="u-alert u-alert--error">
+          인터넷 연결이 끊겼습니다. 와이파이를 확인해주세요.
+        </div>
+      )}
 
       {/* ── 전역 에러 ── */}
       {fetchError && <div className="u-alert u-alert--error">{fetchError}</div>}

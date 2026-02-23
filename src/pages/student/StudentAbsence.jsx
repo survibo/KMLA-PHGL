@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import { useMyProfile } from "../../hooks/useMyProfile";
+import { useNetworkStatus } from "../../hooks/useNetworkStatus";
 
 const STATUS_LABEL = {
   pending: "대기",
@@ -15,6 +16,7 @@ const STATUS_COLOR = {
 };
 
 export default function StudentAbsence() {
+  const isOnline = useNetworkStatus();
   const { loading, session } = useMyProfile();
   const uid = session?.user?.id;
 
@@ -111,6 +113,12 @@ export default function StudentAbsence() {
         </div>
       </div>
 
+      {!isOnline && (
+        <div className="u-alert u-alert--error">
+          인터넷 연결이 끊겼습니다. 와이파이를 확인해주세요.
+        </div>
+      )}
+
       {error ? <div className="u-alert u-alert--error">{error}</div> : null}
 
       <div className="u-panel" style={{ padding: 14 }}>
@@ -141,7 +149,7 @@ export default function StudentAbsence() {
             <div className="f-hint">
               * 제출 후 상태(대기/승인/거절)는 목록에서 확인
             </div>
-            <div className="f-hint" style={{color:"var(--accent-danger)"}}>
+            <div className="f-hint" style={{ color: "var(--accent-danger)" }}>
               * 수정 및 삭제가 불가능 하니, 신중하게 작성하세요.
             </div>
           </div>
