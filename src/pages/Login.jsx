@@ -68,7 +68,6 @@ export default function Login() {
             학생 또는 선생님 페이지로 이동합니다.
           </div>
 
-          {/* ✅ 제작 주체 표기 */}
           <div
             style={{
               marginTop: 6,
@@ -79,6 +78,8 @@ export default function Login() {
             }}
           >
             KMLA 과학기술부에서 제작한 PHGL 웹사이트입니다.
+            <br />
+            <a href="https://www.facebook.com/survibo" target="blank" rel="noopener noreferrer">관련 기술 문의는 <b>여기</b>를 통해 해주세요.</a>
           </div>
         </div>
       </div>
