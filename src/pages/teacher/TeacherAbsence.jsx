@@ -4,7 +4,6 @@ import { supabase } from "../../lib/supabase";
 const SORTS = {
   DATE: "date",
   STATUS: "status",
-  CLASS_STUDENT: "class_student",
   CREATED: "created_at",
 };
 
@@ -14,6 +13,11 @@ const STATUS_LABEL = {
   rejected: "거절",
 };
 
+const STATUS_ORDER = {
+  pending: 0, // 대기
+  rejected: 1, // 거절
+  approved: 2, // 승인
+};
 function formatRequestedAt(iso) {
   if (!iso) return "-";
   const d = new Date(iso);
@@ -40,8 +44,8 @@ export default function TeacherAbsences() {
   const [toDate, setToDate] = useState("");
 
   // ✅ 최초 접속 시 "요청일(생성일)" 최신순 보장
-  const [sortKey, setSortKey] = useState(SORTS.CREATED);
-  const [asc, setAsc] = useState(false);
+  const [sortKey, setSortKey] = useState(SORTS.STATUS);
+  const [asc, setAsc] = useState(true);
 
   const [updatingId, setUpdatingId] = useState(null);
 
@@ -89,7 +93,9 @@ export default function TeacherAbsences() {
       list.map((a) => ({
         ...a,
         student: map.get(a.student_id) ?? null,
-        actor: a.status_updated_by ? map.get(a.status_updated_by) ?? null : null,
+        actor: a.status_updated_by
+          ? map.get(a.status_updated_by) ?? null
+          : null,
       }))
     );
 
@@ -139,7 +145,9 @@ export default function TeacherAbsences() {
 
     if (search.trim()) {
       const q = search.trim().toLowerCase();
-      list = list.filter((r) => (r.student?.name ?? "").toLowerCase().includes(q));
+      list = list.filter((r) =>
+        (r.student?.name ?? "").toLowerCase().includes(q)
+      );
     }
 
     if (status !== "all") {
@@ -161,9 +169,9 @@ export default function TeacherAbsences() {
       }
 
       if (sortKey === SORTS.STATUS) {
-        const va = a.status ?? "";
-        const vb = b.status ?? "";
-        return asc ? va.localeCompare(vb) : vb.localeCompare(va);
+        const va = STATUS_ORDER[a.status] ?? 9999;
+        const vb = STATUS_ORDER[b.status] ?? 9999;
+        return asc ? va - vb : vb - va;
       }
 
       if (sortKey === SORTS.CREATED) {
@@ -219,12 +227,19 @@ export default function TeacherAbsences() {
         >
           <div>
             <div style={{ fontSize: 18, fontWeight: 900 }}>결석 확인</div>
-            <div style={{ marginTop: 4, fontSize: 13, color: "var(--text-muted)" }}>
+            <div
+              style={{ marginTop: 4, fontSize: 13, color: "var(--text-muted)" }}
+            >
               학생 결석 제출을 조회/처리합니다.
             </div>
           </div>
 
-          <button className="c-ctl c-btn" type="button" onClick={load} style={{ fontWeight: 900 }}>
+          <button
+            className="c-ctl c-btn"
+            type="button"
+            onClick={load}
+            style={{ fontWeight: 900 }}
+          >
             새로고침
           </button>
         </div>
@@ -234,13 +249,21 @@ export default function TeacherAbsences() {
         <div className="l-section">
           <div className="f-field">
             <div className="f-label">이름 검색</div>
-            <input className="c-ctl c-input" value={search} onChange={(e) => setSearch(e.target.value)} />
+            <input
+              className="c-ctl c-input"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
           </div>
 
           <div className="r-split">
             <div className="f-field">
               <div className="f-label">상태</div>
-              <select className="c-ctl c-input" value={status} onChange={(e) => setStatus(e.target.value)}>
+              <select
+                className="c-ctl c-input"
+                value={status}
+                onChange={(e) => setStatus(e.target.value)}
+              >
                 <option value="all">전체</option>
                 <option value="pending">대기</option>
                 <option value="approved">승인</option>
@@ -250,10 +273,13 @@ export default function TeacherAbsences() {
 
             <div className="f-field">
               <div className="f-label">정렬</div>
-              <select className="c-ctl c-input" value={sortKey} onChange={(e) => setSortKey(e.target.value)}>
+              <select
+                className="c-ctl c-input"
+                value={sortKey}
+                onChange={(e) => setSortKey(e.target.value)}
+              >
                 <option value={SORTS.DATE}>날짜</option>
                 <option value={SORTS.STATUS}>상태</option>
-                <option value={SORTS.CLASS_STUDENT}>학생(반/번호)</option>
                 <option value={SORTS.CREATED}>제출일(생성일)</option>
               </select>
             </div>
@@ -262,26 +288,40 @@ export default function TeacherAbsences() {
           <div className="r-split">
             <div className="f-field">
               <div className="f-label">시작 날짜</div>
-              <input className="c-ctl c-input" type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+              <input
+                className="c-ctl c-input"
+                type="date"
+                value={fromDate}
+                onChange={(e) => setFromDate(e.target.value)}
+              />
             </div>
             <div className="f-field">
               <div className="f-label">끝 날짜</div>
-              <input className="c-ctl c-input" type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+              <input
+                className="c-ctl c-input"
+                type="date"
+                value={toDate}
+                onChange={(e) => setToDate(e.target.value)}
+              />
             </div>
           </div>
 
           <div className="f-field">
             <div className="f-label">정렬 방향</div>
-            <button className="c-ctl c-btn" type="button" onClick={() => setAsc((v) => !v)}>
+            <button
+              className="c-ctl c-btn"
+              type="button"
+              onClick={() => setAsc((v) => !v)}
+            >
               {asc ? "오름차순 ↑" : "내림차순 ↓"}
             </button>
           </div>
 
-          <div className="f-hint">* 요청 제거, 수정은 불가능합니다</div>
+          <div className="f-hint">* 요청 삭제는 불가능합니다</div>
         </div>
       </div>
 
-      <div className="u-panel" style={{ overflowX: "hidden" }}>
+      <div className="u-panel" style={{ overflowX: "hidden", }}>
         <table
           style={{
             width: "100%",
@@ -291,13 +331,12 @@ export default function TeacherAbsences() {
         >
           <colgroup>
             <col style={{ width: "14%" }} /> {/* 학생 */}
-            <col style={{ width: "5%" }} />  {/* 반 */}
-            <col style={{ width: "10%" }} />  {/* 번호 */}
-            <col style={{ width: "12%" }} /> {/* 날짜 */}
-            <col style={{ width: "15%" }} /> {/* 요청일 */}
-            <col style={{ width: "9%" }} /> {/* 상태 */}
-            <col style={{ width: "12%" }} /> {/* 마지막 처리자 */}
-            <col style={{ width: "23%" }} /> {/* 처리 */}
+            <col style={{ width: "6%" }} /> {/* 반 */}
+            <col style={{ width: "9%" }} /> {/* 번호 */}
+            <col style={{ width: "13%" }} /> {/* 날짜 */}
+            <col style={{ width: "16%" }} /> {/* 요청일 */}
+            <col style={{ width: "16%" }} /> {/* 마지막 처리자 */}
+            <col style={{ width: "26%" }} /> {/* 처리 */}
           </colgroup>
 
           <thead>
@@ -307,7 +346,6 @@ export default function TeacherAbsences() {
               <Th>번호</Th>
               <Th>날짜</Th>
               <Th>요청일</Th>
-              <Th>상태</Th>
               <Th>마지막 처리자</Th>
               <Th>처리</Th>
             </tr>
@@ -324,69 +362,96 @@ export default function TeacherAbsences() {
 
               return (
                 <>
-                  <tr key={r.id} style={{ borderTop: `1px solid var(--border-subtle)` }}>
+                  <tr
+                    key={r.id}
+                    style={{ borderTop: `1px solid var(--border-focus)` }}
+                  >
                     <Td strong>
                       <div
-                        style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                        style={{
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
                         title={r.student?.name ?? ""}
                       >
                         {r.student?.name ?? "(알 수 없음)"}
                       </div>
                     </Td>
 
-                    <Td><div style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{r.student?.class_no ?? "-"}</div></Td>
-                    <Td><div style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{r.student?.student_no ?? "-"}</div></Td>
-                    <Td><div style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{r.date ?? "-"}</div></Td>
-
                     <Td>
-                      <div style={{ overflow: "hidden", textOverflow: "ellipsis" }} title={r.created_at ?? ""}>
-                        {formatRequestedAt(r.created_at)}
+                      <div
+                        style={{ overflow: "hidden", textOverflow: "ellipsis" }}
+                      >
+                        {r.student?.class_no ?? "-"}
                       </div>
                     </Td>
-
                     <Td>
-                      <span
-                        className="c-ctl"
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          minHeight: 34,
-                          padding: "6px 10px",
-                          fontSize: 13,
-                          fontWeight: 900,
-                          borderRadius: 999,
-                          background: "var(--bg-2)",
-                          borderColor: "var(--border-subtle)",
-                          color: r.status === "pending" ? "var(--text-muted)" : "var(--text-1)",
-                          opacity: busy ? 0.6 : 1,
-                          whiteSpace: "normal",
-                          lineHeight: 1.2,
-                        }}
-                        title={`현재 상태: ${STATUS_LABEL[r.status] ?? r.status ?? "-"}`}
+                      <div
+                        style={{ overflow: "hidden", textOverflow: "ellipsis" }}
                       >
-                        {STATUS_LABEL[r.status] ?? r.status ?? "-"}
-                      </span>
+                        {r.student?.student_no ?? "-"}
+                      </div>
+                    </Td>
+                    <Td>
+                      <div
+                        style={{ overflow: "hidden", textOverflow: "ellipsis" }}
+                      >
+                        {r.date ?? "-"}
+                      </div>
                     </Td>
 
                     <Td>
                       <div
-                        style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                        style={{ overflow: "hidden", textOverflow: "ellipsis" }}
+                        title={r.created_at ?? ""}
+                      >
+                        {formatRequestedAt(r.created_at)}
+                      </div>
+                    </Td>
+
+                 
+
+                    <Td>
+                      <div
+                        style={{
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
                         title={actorTip}
                       >
                         {actorName}
                       </div>
-                      <div style={{ marginTop: 4, fontSize: 12, color: "var(--text-muted)", lineHeight: 1.2 }}>
-                        {r.status_updated_at ? formatRequestedAt(r.status_updated_at) : "-"}
+                      <div
+                        style={{
+                          marginTop: 4,
+                          fontSize: 12,
+                          color: "var(--text-muted)",
+                          lineHeight: 1.2,
+                        }}
+                      >
+                        {r.status_updated_at
+                          ? formatRequestedAt(r.status_updated_at)
+                          : "-"}
                       </div>
                     </Td>
 
                     <Td>
-                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      <div
+                        style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: 'center' }}
+                      >
                         <ActionBtn
                           label="승인"
                           active={r.status === "approved"}
                           disabled={busy || r.status === "approved"}
-                          onClick={() => setStatusForAbsence(r.id, r.student?.name, "approved")}
+                          onClick={() =>
+                            setStatusForAbsence(
+                              r.id,
+                              r.student?.name,
+                              "approved"
+                            )
+                          }
                         />
 
                         <ActionBtn
@@ -394,7 +459,13 @@ export default function TeacherAbsences() {
                           danger
                           active={r.status === "rejected"}
                           disabled={busy || r.status === "rejected"}
-                          onClick={() => setStatusForAbsence(r.id, r.student?.name, "rejected")}
+                          onClick={() =>
+                            setStatusForAbsence(
+                              r.id,
+                              r.student?.name,
+                              "rejected"
+                            )
+                          }
                         />
 
                         <ActionBtn
@@ -402,14 +473,25 @@ export default function TeacherAbsences() {
                           muted
                           active={r.status === "pending"}
                           disabled={busy || r.status === "pending"}
-                          onClick={() => setStatusForAbsence(r.id, r.student?.name, "pending")}
+                          onClick={() =>
+                            setStatusForAbsence(
+                              r.id,
+                              r.student?.name,
+                              "pending"
+                            )
+                          }
                         />
                       </div>
 
-                      <div style={{ marginTop: 6, fontSize: 12, color: "var(--text-muted)", lineHeight: 1.25, whiteSpace: "normal" }}>
-                        {r.status === "pending"
-                          ? "대기 → 승인/거절 선택"
-                          : "수정 가능 (승인↔거절, 또는 대기로 되돌리기)"}
+                      <div
+                        style={{
+                          marginTop: 6,
+                          fontSize: 12,
+                          color: "var(--text-muted)",
+                          lineHeight: 1.25,
+                          whiteSpace: "normal",
+                        }}
+                      >
                       </div>
                     </Td>
                   </tr>
@@ -423,7 +505,15 @@ export default function TeacherAbsences() {
                         background: "var(--bg-1)",
                       }}
                     >
-                      <div style={{ fontSize: 12, fontWeight: 900, color: "var(--text-muted)" }}>사유</div>
+                      <div
+                        style={{
+                          fontSize: 12,
+                          fontWeight: 900,
+                          color: "var(--text-muted)",
+                        }}
+                      >
+                        사유
+                      </div>
                       <div
                         style={{
                           marginTop: 6,
@@ -444,7 +534,14 @@ export default function TeacherAbsences() {
 
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={8} style={{ padding: 18, textAlign: "center", color: "var(--text-muted)" }}>
+                <td
+                  colSpan={8}
+                  style={{
+                    padding: 18,
+                    textAlign: "center",
+                    color: "var(--text-muted)",
+                  }}
+                >
                   결과가 없습니다.
                 </td>
               </tr>
@@ -456,7 +553,14 @@ export default function TeacherAbsences() {
   );
 }
 
-function ActionBtn({ label, onClick, disabled, danger = false, muted = false, active = false }) {
+function ActionBtn({
+  label,
+  onClick,
+  disabled,
+  danger = false,
+  muted = false,
+  active = false,
+}) {
   const bg = active ? "var(--bg-2)" : "var(--bg-1)";
   const border = active ? "var(--border-focus)" : "var(--border-subtle)";
 
@@ -494,7 +598,7 @@ function Th({ children }) {
         fontWeight: 900,
         color: "var(--text-2)",
         padding: "12px 14px",
-        borderBottom: "1px solid var(--border-subtle)",
+        borderBottom: "1px solid var(--border-focus)",
         whiteSpace: "normal",
         lineHeight: 1.2,
       }}

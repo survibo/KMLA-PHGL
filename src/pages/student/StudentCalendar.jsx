@@ -14,7 +14,7 @@ import {
 
 const CATEGORIES = ["기초 역량 강화", "진로 탐색"];
 const DOW = ["월", "화", "수", "목", "금", "토", "일"];
-const WEEK_LIMIT = { prev: -7, next: 21 }; // 이전 1주 / 이후 3주
+const WEEK_LIMIT = { prev: 0, next: 21 }; // 이전 1주 / 이후 3주
 const TITLE_MAX = 50;
 const DESC_MAX = 200;
 
@@ -22,7 +22,7 @@ const DEFAULT_DRAFT = {
   category: CATEGORIES[0],
   title: "",
   description: "",
-  minutes: "60",
+  minutes: "",
 };
 
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
@@ -238,6 +238,17 @@ function EventCard({ event, onDelete }) {
           className="c-ctl c-btn c-btn--danger"
           type="button"
           onClick={() => onDelete(event.id)}
+          style={{
+            width: 60,
+            height: 32,
+            flex: "0 0 auto",
+            whiteSpace: "nowrap",
+
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 0,
+          }}
         >
           삭제
         </button>
@@ -629,7 +640,8 @@ export default function StudentCalendar() {
                 style={{
                   marginTop: 6,
                   fontSize: 12,
-                  color: "var(--text-muted)",
+                  color: count > 0 ? "var(--text-1)" : "var(--text-muted)",
+                  fontWeight: count > 0 ? "600" : "300",
                 }}
               >
                 {count}건

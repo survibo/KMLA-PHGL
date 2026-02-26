@@ -6,12 +6,14 @@
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 DROP TABLE IF EXISTS public.absences CASCADE;
 DROP TABLE IF EXISTS public.events CASCADE;
+DROP TABLE IF EXISTS public.audit_logs CASCADE;
 DROP TABLE IF EXISTS public.profiles CASCADE;
 DROP FUNCTION IF EXISTS public.handle_new_user() CASCADE;
 DROP FUNCTION IF EXISTS public.is_teacher() CASCADE;
 DROP FUNCTION IF EXISTS public.handle_profile_update() CASCADE;
 DROP FUNCTION IF EXISTS public.handle_absence_write() CASCADE;
 DROP FUNCTION IF EXISTS public.update_events_timestamp() CASCADE;
+DROP FUNCTION IF EXISTS public.handle_audit_log() CASCADE;
 DROP TYPE IF EXISTS public.user_role CASCADE;
 DROP TYPE IF EXISTS public.absence_status CASCADE;
 DROP TYPE IF EXISTS public.event_category CASCADE;
@@ -47,8 +49,6 @@ CREATE TABLE public.profiles (
 -- =====================================================
 -- HELPER FUNCTIONS
 -- =====================================================
-
--- 현재 로그인한 유저가 승인된 선생인지 확인
 CREATE FUNCTION public.is_teacher()
 RETURNS BOOLEAN
 LANGUAGE SQL
@@ -64,10 +64,6 @@ $$;
 
 -- =====================================================
 -- PROFILES 트리거
--- [역할]
---   1. 선생이 아닌 유저가 role, approved, role_updated_* 컬럼 변경 시 차단
---   2. role이 바뀌면 누가 언제 바꿨는지 role_updated_by/at 자동 기록
---   3. updated_at 자동 갱신
 -- =====================================================
 CREATE FUNCTION public.handle_profile_update()
 RETURNS TRIGGER
@@ -125,11 +121,6 @@ CREATE TABLE public.events (
 
 CREATE INDEX idx_events_owner_date ON public.events(owner_id, date);
 
--- =====================================================
--- EVENTS 트리거
--- [역할]
---   1. updated_at 자동 갱신
--- =====================================================
 CREATE FUNCTION public.update_events_timestamp()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -168,17 +159,6 @@ CREATE TABLE public.absences (
 
 CREATE INDEX idx_absences_student_date ON public.absences(student_id, date);
 
--- =====================================================
--- ABSENCES 트리거
--- [역할]
---   INSERT:
---     1. status 무조건 pending 고정 (클라이언트에서 approved 등 넣어도 무시)
---     2. updated_at 자동 세팅
---   UPDATE:
---     1. 학생이 status 변경 시도하면 차단
---     2. status가 바뀌면 누가 언제 바꿨는지 status_updated_by/at 자동 기록
---     3. updated_at 자동 갱신
--- =====================================================
 CREATE FUNCTION public.handle_absence_write()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -208,9 +188,57 @@ FOR EACH ROW
 EXECUTE FUNCTION public.handle_absence_write();
 
 -- =====================================================
+-- AUDIT LOGS
+-- =====================================================
+CREATE TABLE public.audit_logs (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  changed_by   UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
+  table_name   TEXT        NOT NULL,
+  operation    TEXT        NOT NULL, -- INSERT / UPDATE / DELETE
+  old_data     JSONB,
+  new_data     JSONB,
+  changed_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_audit_logs_table    ON public.audit_logs(table_name);
+CREATE INDEX idx_audit_logs_changed_at ON public.audit_logs(changed_at DESC);
+
+-- =====================================================
+-- AUDIT 트리거 함수 (events, absences 공용)
+-- =====================================================
+CREATE FUNCTION public.handle_audit_log()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  INSERT INTO public.audit_logs (changed_by, table_name, operation, old_data, new_data)
+  VALUES (
+    auth.uid(),
+    TG_TABLE_NAME,
+    TG_OP,
+    CASE WHEN TG_OP = 'INSERT' THEN NULL ELSE to_jsonb(old) END,
+    CASE WHEN TG_OP = 'DELETE' THEN NULL ELSE to_jsonb(new) END
+  );
+  RETURN COALESCE(new, old);
+END;
+$$;
+
+-- events에 audit 트리거 등록
+CREATE TRIGGER trg_events_audit
+AFTER INSERT OR UPDATE OR DELETE ON public.events
+FOR EACH ROW
+EXECUTE FUNCTION public.handle_audit_log();
+
+-- absences에 audit 트리거 등록
+CREATE TRIGGER trg_absences_audit
+AFTER INSERT OR UPDATE OR DELETE ON public.absences
+FOR EACH ROW
+EXECUTE FUNCTION public.handle_audit_log();
+
+-- =====================================================
 -- AUTH 연동
--- [역할]
---   Supabase에 새 유저가 가입하면 자동으로 profiles 행 생성
 -- =====================================================
 CREATE FUNCTION public.handle_new_user()
 RETURNS TRIGGER
@@ -237,14 +265,13 @@ EXECUTE FUNCTION public.handle_new_user();
 -- =====================================================
 -- RLS 활성화
 -- =====================================================
-ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.events   ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.absences ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.profiles   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.events     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.absences   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
 
 -- =====================================================
 -- PROFILES RLS
---   SELECT: 본인 또는 선생만 조회 가능
---   UPDATE: 본인 또는 선생만 수정 가능 (세부 제한은 트리거에서)
 -- =====================================================
 CREATE POLICY profiles_select
 ON public.profiles FOR SELECT
@@ -256,8 +283,6 @@ USING (id = auth.uid() OR public.is_teacher());
 
 -- =====================================================
 -- EVENTS RLS
---   ALL:    본인 이벤트만 CRUD 가능
---   SELECT: 선생은 전체 조회 가능
 -- =====================================================
 CREATE POLICY events_own_all
 ON public.events FOR ALL
@@ -269,9 +294,6 @@ USING (public.is_teacher());
 
 -- =====================================================
 -- ABSENCES RLS
---   SELECT: 본인 또는 선생만 조회 가능
---   INSERT: 본인 student_id로만 삽입 가능
---   UPDATE: 선생만 수정 가능 (세부 제한은 트리거에서)
 -- =====================================================
 CREATE POLICY absences_select
 ON public.absences FOR SELECT
@@ -283,4 +305,12 @@ WITH CHECK (student_id = auth.uid());
 
 CREATE POLICY absences_update
 ON public.absences FOR UPDATE
+USING (public.is_teacher());
+
+-- =====================================================
+-- AUDIT LOGS RLS
+--   선생만 조회 가능, 직접 INSERT/UPDATE/DELETE 불가 (트리거만 가능)
+-- =====================================================
+CREATE POLICY audit_logs_teacher_select
+ON public.audit_logs FOR SELECT
 USING (public.is_teacher());

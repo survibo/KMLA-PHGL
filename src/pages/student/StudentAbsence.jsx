@@ -10,10 +10,25 @@ const STATUS_LABEL = {
 };
 
 const STATUS_COLOR = {
-  approved: "green", // 승인 → 초록
-  rejected: "var(--accent-danger)", // 거절 → 붉은색
-  pending: "var(--text-1)", // 대기 → 검정
+  approved: "green",
+  rejected: "var(--accent-danger)",
+  pending: "var(--text-1)",
 };
+
+// ✅ 제출시각 표시용 (KST 기준 브라우저 로컬타임)
+function formatSubmittedAt(iso) {
+  if (!iso) return "-";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "-";
+
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const min = String(d.getMinutes()).padStart(2, "0");
+
+  return `${yyyy}-${mm}-${dd} ${hh}:${min}`;
+}
 
 export default function StudentAbsence() {
   const isOnline = useNetworkStatus();
@@ -73,7 +88,6 @@ export default function StudentAbsence() {
     setSaving(true);
     setError("");
 
-    // 학생은 status/student_id를 임의로 바꾸면 안 됨 → 서버 기준으로 고정
     const payload = {
       student_id: uid,
       date: draft.date,
@@ -150,7 +164,7 @@ export default function StudentAbsence() {
               * 제출 후 상태(대기/승인/거절)는 목록에서 확인
             </div>
             <div className="f-hint" style={{ color: "var(--accent-danger)" }}>
-              * 수정 및 삭제가 불가능 하니, 신중하게 작성하세요.
+              * 수정 및 삭제가 불가능하니, 신중하게 제출하세요.
             </div>
           </div>
 
@@ -196,9 +210,17 @@ export default function StudentAbsence() {
                       justifyContent: "space-between",
                       gap: 10,
                       flexWrap: "wrap",
+                      alignItems: "baseline",
                     }}
                   >
-                    <div style={{ fontWeight: 900 }}>{a.date}</div>
+                    {/* ✅ 날짜 + 제출시각 */}
+                    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: 'center'}}>
+                      <div style={{ fontWeight: 900 }}>{a.date}</div>
+                      <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                        {formatSubmittedAt(a.created_at)}
+                      </div>
+                    </div>
+
                     <div
                       style={{
                         fontSize: 15,
@@ -209,6 +231,7 @@ export default function StudentAbsence() {
                       {STATUS_LABEL[a.status] ?? a.status ?? "-"}
                     </div>
                   </div>
+
                   <div
                     style={{
                       marginTop: 8,

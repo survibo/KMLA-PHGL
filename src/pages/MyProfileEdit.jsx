@@ -151,7 +151,7 @@ export default function MyProfileEdit() {
                 value={grade}
                 onChange={(e) => setGrade(e.target.value)}
                 inputMode="numeric"
-                placeholder="숫자"
+                placeholder="31"
               />
             </div>
 
@@ -162,7 +162,7 @@ export default function MyProfileEdit() {
                 value={classNo}
                 onChange={(e) => setClassNo(e.target.value)}
                 inputMode="numeric"
-                placeholder="숫자"
+                placeholder="1-10"
               />
             </div>
           </div>
@@ -175,17 +175,15 @@ export default function MyProfileEdit() {
               value={studentNo}
               onChange={(e) => setStudentNo(e.target.value)}
               inputMode="numeric"
-              placeholder="숫자"
+              placeholder="261000"
             />
           </div>
 
-          <div className="u-panel" style={{ padding: 12, background: "var(--bg-2)" }}>
-            <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-              * 기수/행정반/학번은 저장 전에 반드시 숫자로 입력해야 합니다.
-            </div>
-          </div>
+            <a style={{ fontSize: 12, color: "var(--text-muted)" }}>
+              * 기수/행정반/학번은 숫자로 입력해야 합니다.
+            </a>
 
-          {error ? <div className="u-alert u-alert--error">에러: {error}</div> : null}
+          {error ? <div className="u-alert u-alert--error">{error}</div> : null}
 
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
             <button type="submit" className="c-ctl c-btn" disabled={saving}>
