@@ -15,6 +15,8 @@ import {
 const CATEGORIES = ["기초 역량 강화", "진로 탐색"];
 const DOW = ["월", "화", "수", "목", "금", "토", "일"];
 const WEEK_LIMIT = { prev: -7, next: 21 }; // 이전 1주 / 이후 3주
+const TITLE_MAX = 50;
+const DESC_MAX = 200;
 
 const DEFAULT_DRAFT = {
   category: CATEGORIES[0],
@@ -113,6 +115,24 @@ function useWeekEvents({ uid, weekStartISO, weekEndISO }) {
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
+function CharCount({ value, max }) {
+  const len = (value ?? "").length;
+  const over = len > max;
+
+  return (
+    <div
+      className="f-hint"
+      style={{
+        display: "flex",
+        justifyContent: "flex-end",
+        color: over ? "var(--accent-danger)" : "var(--text-muted)",
+      }}
+      aria-live="polite"
+    >
+      {len}/{max}
+    </div>
+  );
+}
 
 function Modal({ open, title, onClose, children }) {
   if (!open) return null;
@@ -218,7 +238,6 @@ function EventCard({ event, onDelete }) {
           className="c-ctl c-btn c-btn--danger"
           type="button"
           onClick={() => onDelete(event.id)}
-          style={{ height: "fit-content" }}
         >
           삭제
         </button>
@@ -255,7 +274,9 @@ function AddEventForm({ draft, onChange, onSubmit, onCancel, saving, error }) {
           onChange={(e) => onChange("title", e.target.value)}
           placeholder="ex) 수학의 정석 1단원 연습문제"
           autoFocus
+          maxLength={TITLE_MAX}
         />
+        <CharCount value={draft.title} max={TITLE_MAX} />
       </div>
 
       <div className="f-field">
@@ -281,7 +302,9 @@ function AddEventForm({ draft, onChange, onSubmit, onCancel, saving, error }) {
           onChange={(e) => onChange("description", e.target.value)}
           placeholder="ex) 수학의 정석 연습문제 1-1 ~ 1-10"
           rows={3}
+          maxLength={DESC_MAX}
         />
+        <CharCount value={draft.description} max={DESC_MAX} />
       </div>
 
       <div className="m-footer" style={{ padding: 0 }}>
@@ -390,8 +413,18 @@ export default function StudentCalendar() {
   const [formError, setFormError] = useState("");
   const [draft, setDraft] = useState(DEFAULT_DRAFT);
 
-  const updateDraft = (field, value) =>
-    setDraft((prev) => ({ ...prev, [field]: value }));
+  const updateDraft = (field, value) => {
+    const v = value ?? "";
+
+    const limited =
+      field === "title"
+        ? v.slice(0, TITLE_MAX)
+        : field === "description"
+        ? v.slice(0, DESC_MAX)
+        : v;
+
+    setDraft((prev) => ({ ...prev, [field]: limited }));
+  };
 
   const openAddModal = () => {
     setFormError("");
@@ -405,6 +438,15 @@ export default function StudentCalendar() {
 
     if (!draft.title.trim()) {
       setFormError("내용은 비워둘 수 없음");
+      return;
+    }
+
+    if (draft.title.trim().length > TITLE_MAX) {
+      setFormError(`내용은 ${TITLE_MAX}자 이하여야 함`);
+      return;
+    }
+    if (draft.description.trim().length > DESC_MAX) {
+      setFormError(`설명은 ${DESC_MAX}자 이하여야 함`);
       return;
     }
     if (!CATEGORIES.includes(draft.category)) {
