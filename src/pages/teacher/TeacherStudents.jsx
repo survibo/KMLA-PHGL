@@ -34,7 +34,9 @@ export default function TeacherStudents() {
       // ✅ role 조건 제거(teacher/기타가 있어도 화면에서는 student만 보여주면 됨)
       const { data, error } = await supabase
         .from("profiles")
-        .select("id, name, grade, class_no, student_no, approved, role");
+        .select(
+          "id, name, grade, class_no, student_no, approved, role, is_hidden"
+        );
 
       if (error) {
         setError(error.message);
@@ -51,7 +53,9 @@ export default function TeacherStudents() {
 
   // ✅ 화면에 보여줄 "학생"만 (DB에는 teacher도 있을 수 있으니 여기서 필터)
   const filtered = useMemo(() => {
-    let list = students.filter((s) => (s.role ?? "student") === "student");
+    let list = students.filter(
+      (s) => (s.role ?? "student") === "student" && !s.is_hidden
+    );
 
     if (search.trim()) {
       const q = search.trim().toLowerCase();
@@ -87,10 +91,41 @@ export default function TeacherStudents() {
     return "student_no";
   }, [sortKey]);
 
+  const hideStudent = async (student) => {
+    const ok = window.confirm(
+      `숨길 시 대기자 명단에서 ${
+        student.name ?? "학생"
+      } 이(가) 영구적으로 사라집니다.\n진행하시겠습니까?`
+    );
+    if (!ok) return;
+
+    try {
+      setUpdatingId(student.id);
+
+      const { error } = await supabase
+        .from("profiles")
+        .update({ is_hidden: true })
+        .eq("id", student.id);
+
+      if (error) throw error;
+
+      // 로컬 상태 업데이트 (목록에서 즉시 제거됨)
+      setStudents((prev) =>
+        prev.map((s) => (s.id === student.id ? { ...s, is_hidden: true } : s))
+      );
+    } catch (err) {
+      window.alert(`숨기기 실패: ${err?.message ?? String(err)}`);
+    } finally {
+      setUpdatingId(null);
+    }
+  };
+
   const toggleApproved = async (student) => {
     if (student.approved) {
       const ok = window.confirm(
-        `${student.name ?? "학생"}의 승인을 취소할까요?\n취소하면 학생은 /pending 상태로 돌아갑니다.`
+        `${
+          student.name ?? "학생"
+        }의 승인을 취소할까요?\n취소하면 학생은 /pending 상태로 돌아갑니다.`
       );
       if (!ok) return;
     }
@@ -136,6 +171,7 @@ export default function TeacherStudents() {
         .update({ approved: true })
         .in("id", ids)
         .eq("approved", false)
+        .eq("is_hidden", false)
         .select("id, name, grade, class_no, student_no, approved, role");
 
       if (error) throw error;
@@ -168,7 +204,9 @@ export default function TeacherStudents() {
 
     // ✅ 모달(1차) + confirm(2차)
     const ok = window.confirm(
-      `진짜로 "${s.name ?? "사용자"}"에게 선생님 권한을 부여할까요?\n(role=teacher, approved=true)`
+      `진짜로 "${
+        s.name ?? "사용자"
+      }"에게 선생님 권한을 부여할까요?\n(role=teacher, approved=true)`
     );
     if (!ok) return;
 
@@ -230,15 +268,24 @@ export default function TeacherStudents() {
         >
           <div>
             <div style={{ fontSize: 18, fontWeight: 900 }}>학생 관리</div>
-            <div style={{ marginTop: 4, fontSize: 13, color: "var(--text-muted)" }}>
+            <div
+              style={{ marginTop: 4, fontSize: 13, color: "var(--text-muted)" }}
+            >
               학생 승인 상태를 조회/변경합니다. (이름 클릭 → 캘린더)
             </div>
           </div>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end" }}>
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+              alignItems: "flex-end",
+            }}
+          >
             <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
-              총 <b style={{ color: "var(--text-1)" }}>{filtered.length}</b>명 / 전체{" "}
-              <b style={{ color: "var(--text-1)" }}>{students.length}</b>명
+              총 <b style={{ color: "var(--text-1)" }}>{filtered.length}</b>명 /
+              전체 <b style={{ color: "var(--text-1)" }}>{students.length}</b>명
             </div>
 
             <button
@@ -263,7 +310,9 @@ export default function TeacherStudents() {
                     : 1,
               }}
             >
-              {bulkApproving ? "전체 승인 중..." : `전체 승인 (${pendingInFiltered.length}명)`}
+              {bulkApproving
+                ? "전체 승인 중..."
+                : `전체 승인 (${pendingInFiltered.length}명)`}
             </button>
           </div>
         </div>
@@ -298,23 +347,32 @@ export default function TeacherStudents() {
 
             <div className="f-field">
               <div className="f-label">정렬 방향</div>
-              <button type="button" className="c-ctl c-btn" onClick={() => setAsc((v) => !v)}>
+              <button
+                type="button"
+                className="c-ctl c-btn"
+                onClick={() => setAsc((v) => !v)}
+              >
                 {asc ? "오름차순 ↑" : "내림차순 ↓"}
               </button>
             </div>
           </div>
 
           <div className="f-hint">
-            * 승인 취소는 확인창이 뜹니다. 승인 처리(대기 → 승인)는 즉시 반영됩니다.
-            <br />
-            * 전체 승인은 현재 목록(검색/정렬 반영)에서 <b>대기 중</b> 학생만 승인합니다.
+            * 승인 취소는 확인창이 뜹니다. 승인 처리(대기 → 승인)는 즉시
+            반영됩니다.
+            <br />* 전체 승인은 현재 목록(검색/정렬 반영)에서 <b>
+              대기 중
+            </b>{" "}
+            학생만 승인합니다.
           </div>
         </div>
       </div>
 
       {/* Table */}
       <div className="u-panel" style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 900 }}>
+        <table
+          style={{ width: "100%", borderCollapse: "collapse", minWidth: 900 }}
+        >
           <thead>
             <tr style={{ background: "var(--bg-2)" }}>
               <Th>이름</Th>
@@ -323,16 +381,18 @@ export default function TeacherStudents() {
               <Th>번호</Th>
               <Th>승인</Th>
               <Th>권한</Th>
-              <Th>캘린더</Th>
             </tr>
           </thead>
 
           <tbody>
             {filtered.map((s) => {
-              const busy = updatingId === s.id || bulkApproving || grantingId != null;
+              const busy =
+                updatingId === s.id || bulkApproving || grantingId != null;
 
               const statusText = s.approved ? "승인됨" : "대기";
-              const statusColor = s.approved ? "var(--text-1)" : "var(--text-muted)";
+              const statusColor = s.approved
+                ? "var(--text-1)"
+                : "var(--text-muted)";
               const actionText = s.approved ? "취소" : "승인";
 
               const calTo = `/teacher/calendar/${s.id}?order=${calendarOrder}`;
@@ -363,7 +423,13 @@ export default function TeacherStudents() {
                       title="캘린더 보기"
                     >
                       {s.name ?? "-"}
-                      <span style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 900 }}>
+                      <span
+                        style={{
+                          fontSize: 12,
+                          color: "var(--text-muted)",
+                          fontWeight: 900,
+                        }}
+                      >
                         보기 →
                       </span>
                     </Link>
@@ -384,13 +450,21 @@ export default function TeacherStudents() {
                         flexWrap: "wrap",
                       }}
                     >
-                      <span style={{ fontSize: 13, fontWeight: 800, color: statusColor }}>
+                      <span
+                        style={{
+                          fontSize: 13,
+                          fontWeight: 800,
+                          color: statusColor,
+                        }}
+                      >
                         {statusText}
                       </span>
 
                       <button
                         type="button"
-                        className={`c-ctl c-btn ${s.approved ? "c-btn--danger" : ""}`}
+                        className={`c-ctl c-btn ${
+                          s.approved ? "c-btn--danger" : ""
+                        }`}
                         disabled={busy}
                         onClick={() => toggleApproved(s)}
                         title={s.approved ? "승인 취소" : "승인 처리"}
@@ -415,9 +489,6 @@ export default function TeacherStudents() {
                         flexWrap: "wrap",
                       }}
                     >
-                      <span style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 900 }}>
-                        학생
-                      </span>
 
                       <button
                         type="button"
@@ -431,32 +502,29 @@ export default function TeacherStudents() {
 
                           // ✅ CSS 파일 안 건드리고 '악센트' 느낌만 inline로 줌
                           borderColor: "var(--accent-danger)",
-                          color:"var(--accent-danger)",
+                          color: "var(--accent-danger)",
                           background: "var(--bg-2)",
                         }}
                       >
                         선생님 권한 주기
                       </button>
-                    </div>
-                  </Td>
 
-                  {/* 캘린더 */}
-                  <Td>
-                    <Link
-                      to={calTo}
-                      className="c-ctl c-btn"
-                      style={{
-                        minHeight: 40,
-                        padding: "8px 10px",
-                        fontWeight: 900,
-                        display: "inline-flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                      title="캘린더 보기"
-                    >
-                      캘린더
-                    </Link>
+                      {!s.approved && (
+                        <button
+                          type="button"
+                          className="c-ctl c-btn"
+                          disabled={busy}
+                          onClick={() => hideStudent(s)}
+                          style={{
+                            fontWeight: 900,
+                            opacity: busy ? 0.6 : 1,
+                            fontSize: 12,
+                          }}
+                        >
+                          숨기기
+                        </button>
+                      )}
+                    </div>
                   </Td>
                 </tr>
               );
@@ -464,7 +532,14 @@ export default function TeacherStudents() {
 
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={7} style={{ padding: 18, textAlign: "center", color: "var(--text-muted)" }}>
+                <td
+                  colSpan={7}
+                  style={{
+                    padding: 18,
+                    textAlign: "center",
+                    color: "var(--text-muted)",
+                  }}
+                >
                   검색 결과가 없습니다.
                 </td>
               </tr>
@@ -476,7 +551,11 @@ export default function TeacherStudents() {
       {/* ✅ Modal (CSS는 이미 있음: m-overlay/m-backdrop/m-box/...) */}
       {grantTarget ? (
         <div className="m-overlay" role="dialog" aria-modal="true">
-          <button className="m-backdrop" onClick={closeGrantModal} aria-label="닫기" />
+          <button
+            className="m-backdrop"
+            onClick={closeGrantModal}
+            aria-label="닫기"
+          />
 
           <div className="m-box">
             <div className="m-header">
@@ -493,7 +572,13 @@ export default function TeacherStudents() {
             </div>
 
             <div className="m-body">
-              <div style={{ fontSize: 13, color: "var(--text-2)", fontWeight: 800 }}>
+              <div
+                style={{
+                  fontSize: 13,
+                  color: "var(--text-2)",
+                  fontWeight: 800,
+                }}
+              >
                 아래 사용자에게 선생님 권한을 부여할까요?
               </div>
 
@@ -506,16 +591,31 @@ export default function TeacherStudents() {
                 }}
               >
                 <div style={{ fontWeight: 900 }}>{grantTarget.name ?? "-"}</div>
-                <div style={{ marginTop: 4, fontSize: 12, color: "var(--text-muted)", fontWeight: 800 }}>
+                <div
+                  style={{
+                    marginTop: 4,
+                    fontSize: 12,
+                    color: "var(--text-muted)",
+                    fontWeight: 800,
+                  }}
+                >
                   id: {grantTarget.id}
                 </div>
-                <div style={{ marginTop: 6, fontSize: 12, color: "var(--text-muted)", fontWeight: 800 }}>
+                <div
+                  style={{
+                    marginTop: 6,
+                    fontSize: 12,
+                    color: "var(--text-muted)",
+                    fontWeight: 800,
+                  }}
+                >
                   변경 내용: role = teacher, approved = true
                 </div>
               </div>
 
               <div className="u-alert u-alert--error" style={{ marginTop: 12 }}>
-                주의: 선생님 권한은 전체 학생 조회/승인/결석 처리 권한을 포함합니다.
+                주의: 선생님 권한은 전체 학생 조회/승인/결석 처리 권한을
+                포함합니다.
               </div>
             </div>
 
