@@ -109,7 +109,7 @@ export default function TeacherHeader() {
           target="blank"
           rel="noopener noreferrer"
         >
-          모든 기술적 문의는 <b>30기 김서혁</b>에게 해주시면 됩니다.{" "}
+          시스템 이용 문의: <b>30기 김서혁</b>
         </a>
       </div>
     </div>
