@@ -94,6 +94,24 @@ export default function TeacherHeader() {
         <Tab to="/teacher/profile" label="내 정보" />
         <Tab to="/teacher/teachers" label="선생님 목록" />
       </div>
+      <div
+        style={{
+          marginTop: 10,
+          fontSize: 12,
+          color: "var(--text-muted)",
+          fontWeight: 500,
+          paddingLeft: 4,
+        }}
+      >
+        {" "}
+        <a
+          href="https://www.facebook.com/survibo"
+          target="blank"
+          rel="noopener noreferrer"
+        >
+          모든 기술적 문의는 <b>30기 김서혁</b>에게 해주시면 됩니다.{" "}
+        </a>
+      </div>
     </div>
   );
 }
