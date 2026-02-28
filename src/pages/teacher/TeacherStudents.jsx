@@ -14,7 +14,7 @@ export default function TeacherStudents() {
   const [error, setError] = useState("");
 
   const [search, setSearch] = useState("");
-  const [sortKey, setSortKey] = useState(SORTS.STUDENT_NO);
+  const [sortKey, setSortKey] = useState(SORTS.APPROVED);
   const [asc, setAsc] = useState(true);
 
   const [updatingId, setUpdatingId] = useState(null);
@@ -157,7 +157,7 @@ export default function TeacherStudents() {
     if (pendingInFiltered.length === 0) return;
 
     const ok = window.confirm(
-      `현재 목록에서 대기 중인 ${pendingInFiltered.length}명을 모두 승인할까요?\n(승인만 수행하며, 취소는 하지 않습니다.)`
+      `현재 목록에서 대기 중인 ${pendingInFiltered.length}명을 모두 승인할까요?\n(숨긴 학생은 승인하지 않습니다)`
     );
     if (!ok) return;
 

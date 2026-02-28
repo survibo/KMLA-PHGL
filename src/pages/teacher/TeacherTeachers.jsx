@@ -38,7 +38,7 @@ export default function TeacherTeachers() {
   const [approved, setApproved] = useState("all"); // all | approved | pending
 
   // 박탈 포함 표시 토글
-  const [includeRevoked, setIncludeRevoked] = useState(true);
+  const [includeRevoked, setIncludeRevoked] = useState(false);
 
   // 기본: 최근 생성(가입) 순
   const [sortKey, setSortKey] = useState(SORTS.CREATED);

@@ -49,7 +49,8 @@ export default function App() {
           </ProtectedRoute>
         }
       />
-      <Route
+
+      <Route 
         path="/student/profile"
         element={
           <ProtectedRoute allowRole="student">
@@ -59,6 +60,8 @@ export default function App() {
           </ProtectedRoute>
         }
       />
+
+      {/* 나중에 닫는거 고려 */}
       <Route
         path="/student/profile/edit"
         element={

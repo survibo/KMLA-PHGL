@@ -16,7 +16,9 @@ function InfoRow({ label, value }) {
         alignItems: "center",
       }}
     >
-      <div style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 800 }}>
+      <div
+        style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 800 }}
+      >
         {label}
       </div>
       <div style={{ fontWeight: 900 }}>{value ?? "-"}</div>
@@ -41,13 +43,17 @@ export default function MyProfile() {
   if (!profile) {
     return (
       <div className="l-page">
-        <div className="u-alert u-alert--error">프로필을 불러올 수 없습니다.</div>
+        <div className="u-alert u-alert--error">
+          프로필을 불러올 수 없습니다.
+        </div>
       </div>
     );
   }
 
   const editPath =
-    profile.role === "teacher" ? "/teacher/profile/edit" : "/student/profile/edit";
+    profile.role === "teacher"
+      ? "/teacher/profile/edit"
+      : "/student/profile/edit";
 
   return (
     <div className="l-page">
@@ -63,11 +69,18 @@ export default function MyProfile() {
         >
           <div>
             <div style={{ fontSize: 18, fontWeight: 900 }}>내 정보</div>
-            <div style={{ marginTop: 4, fontSize: 13, color: "var(--accent-danger)" }}>
+            <div
+              style={{
+                marginTop: 4,
+                fontSize: 13,
+                color: "var(--accent-danger)",
+              }}
+            >
               자신의 이름, 기수, 행정반, 학번을 입력해주세요.
             </div>
           </div>
 
+          {/* 나중에 닫는거 고려 */}
           <button
             type="button"
             className="c-ctl c-btn"
@@ -85,9 +98,9 @@ export default function MyProfile() {
           <InfoRow label="학번" value={profile.student_no} />
         </div>
 
-          <div style={{ marginTop: 12 }}>
-            <StudentGoCalendar />
-          </div>
+        <div style={{ marginTop: 12 }}>
+          <StudentGoCalendar />
+        </div>
       </div>
     </div>
   );
