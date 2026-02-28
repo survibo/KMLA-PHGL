@@ -12,7 +12,6 @@ export default function AuthCallback() {
       const { data, error } = await supabase.auth.getSession();
 
       if (error) {
-        console.error(error);
         navigate("/login", { replace: true });
         return;
       }
