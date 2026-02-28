@@ -38,7 +38,7 @@ export default function TeacherAbsences() {
 
   const [rows, setRows] = useState([]); // {absence + student + actor}
   const [search, setSearch] = useState("");
-  const [status, setStatus] = useState("all");
+  const [status, setStatus] = useState("pending");
 
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");

@@ -18,7 +18,7 @@ export default function ProtectedRoute({ allowRole, children }) {
   // 역할 불일치면 역할별 홈으로 튕김
   if (allowRole && profile.role !== allowRole) {
     return profile.role === "teacher" ? (
-      <Navigate to="/teacher" replace />
+      <Navigate to="/teacher/students" replace />
     ) : (
       <Navigate to="/student/calendar" replace />
     );
