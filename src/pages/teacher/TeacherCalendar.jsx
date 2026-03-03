@@ -172,7 +172,8 @@ async function fetchStudents() {
   const { data, error } = await supabase
     .from("profiles")
     .select("id, name, grade, class_no, student_no, approved, role")
-    .eq("role", "student");
+    .eq("role", "student")
+    .eq("approved", true)
 
   if (error) throw new Error(error.message);
   return data ?? [];

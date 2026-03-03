@@ -284,8 +284,8 @@ export default function TeacherStudents() {
             }}
           >
             <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
-              총 <b style={{ color: "var(--text-1)" }}>{filtered.length}</b>명 /
-              전체 <b style={{ color: "var(--text-1)" }}>{students.length}</b>명
+              허용된 학생 <b style={{ color: "var(--text-1)" }}>{filtered.filter(s => s.approved).length}</b>명 /
+              전체 학생 <b style={{ color: "var(--text-1)" }}>{filtered.length}</b>명
             </div>
 
             <button
