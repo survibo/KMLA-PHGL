@@ -174,8 +174,7 @@ async function fetchStudents() {
     .select("id, name, grade, class_no, student_no, approved, role")
     .eq("role", "student")
     .eq("approved", true)
-    .eq("is_hidden", false)
-
+    .eq("is_hidden", false);
 
   if (error) throw new Error(error.message);
   return data ?? [];
@@ -353,7 +352,9 @@ function useTeacherCalendarState({ studentId, students, order }) {
 
   const navigateToStudent = useCallback(
     (idx) => {
-      navigate(`/teacher/calendar/${sortedStudents[idx].id}?week=${weekStart}&day=0`);
+      navigate(
+        `/teacher/calendar/${sortedStudents[idx].id}?week=${weekStart}&day=0`
+      );
     },
     [navigate, sortedStudents, weekStart]
   );
@@ -501,27 +502,41 @@ function OrderToggle({ order, onChange }) {
 
 function StudentSearch({ students, currentStudentId, onSelect }) {
   const [keyword, setKeyword] = useState("");
-
   const trimmedKeyword = keyword.trim();
 
   const filtered = useMemo(() => {
     const q = trimmedKeyword.toLowerCase();
     if (!q) return [];
 
+    // "2반" 입력 시 "2"만 추출하거나 "반"을 제거한 검색어 준비
+    const pureDigit = q.replace(/[^0-9]/g, ""); // 숫자만 추출 (2반 -> 2)
+    const hasBan = q.includes("반");
+
     return students
-      .filter((s) => {
+      .map((s) => {
         const name = String(s.name ?? "").toLowerCase();
         const cls = String(s.class_no ?? "");
         const no = String(s.student_no ?? "");
-        const full = `${cls}-${no}`;
 
-        return (
-          name.includes(q) ||
-          cls.includes(q) ||
-          no.includes(q) ||
-          full.includes(q)
-        );
+        let score = 0;
+
+        // 1. 반 우선순위 가중치
+        if (hasBan && cls === pureDigit)
+          score += 100; // "2반" 입력하고 반이 "2"일 때 (최우선)
+        else if (cls === q || cls === pureDigit) score += 80; // "2"만 입력해도 반이 일치하면 높은 점수
+
+        // 2. 이름 가중치
+        if (name === q) score += 90; // 이름이 정확히 일치
+        else if (name.includes(q)) score += 40;
+
+        // 3. 학번(번호) 가중치
+        if (no === q || no === pureDigit) score += 30; // 번호가 일치
+        else if (no.includes(q)) score += 10;
+
+        return { ...s, score };
       })
+      .filter((s) => s.score > 0) // 연관성 있는 결과만 남김
+      .sort((a, b) => b.score - a.score) // 점수 높은 순으로 정렬
       .slice(0, 8);
   }, [students, trimmedKeyword]);
 
