@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
+import * as XLSX from "xlsx";
 
 const SORTS = {
   DATE: "date",
@@ -105,6 +106,45 @@ export default function TeacherAbsences() {
   useEffect(() => {
     load();
   }, []);
+
+  function exportToExcel() {
+    if (rows.length === 0) {
+      window.alert("내보낼 데이터가 없습니다.");
+      return;
+    }
+
+    const sorted = [...rows].sort((a, b) => {
+      const da = a.date ?? "";
+      const db = b.date ?? "";
+      if (da !== db) return da.localeCompare(db);
+
+      const ca = a.created_at ?? "";
+      const cb = b.created_at ?? "";
+      return ca.localeCompare(cb);
+    });
+
+    const exportData = sorted.map((r) => ({
+      이름: r.student?.name ?? "-",
+      반: r.student?.class_no ?? "-",
+      번호: r.student?.student_no ?? "-",
+      결석날짜: r.date ?? "-",
+      사유: r.reason ?? "-",
+      상태: STATUS_LABEL[r.status] ?? r.status ?? "-",
+      요청일: formatRequestedAt(r.created_at),
+      처리자: r.actor?.name ?? "-",
+      처리일: r.status_updated_at
+        ? formatRequestedAt(r.status_updated_at)
+        : "-",
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "결석목록");
+    XLSX.writeFile(
+      wb,
+      `결석목록_${new Date().toISOString().slice(0, 10)}.xlsx`
+    );
+  }
 
   // ✅ 상태 변경 + 확인창(학생 이름 포함)
   async function setStatusForAbsence(absenceId, studentName, nextStatus) {
@@ -234,14 +274,25 @@ export default function TeacherAbsences() {
             </div>
           </div>
 
-          <button
-            className="c-ctl c-btn"
-            type="button"
-            onClick={load}
-            style={{ fontWeight: 900 }}
-          >
-            새로고침
-          </button>
+          <div>
+            <button
+              className="c-ctl c-btn"
+              type="button"
+              onClick={exportToExcel}
+              style={{ fontWeight: 900, marginRight: 10 }}
+            >
+              엑셀 추출
+            </button>
+
+            <button
+              className="c-ctl c-btn"
+              type="button"
+              onClick={load}
+              style={{ fontWeight: 900 }}
+            >
+              새로고침
+            </button>
+          </div>
         </div>
       </div>
 
@@ -321,7 +372,7 @@ export default function TeacherAbsences() {
         </div>
       </div>
 
-      <div className="u-panel" style={{ overflowX: "hidden", }}>
+      <div className="u-panel" style={{ overflowX: "hidden" }}>
         <table
           style={{
             width: "100%",
@@ -410,8 +461,6 @@ export default function TeacherAbsences() {
                       </div>
                     </Td>
 
-                 
-
                     <Td>
                       <div
                         style={{
@@ -439,7 +488,12 @@ export default function TeacherAbsences() {
 
                     <Td>
                       <div
-                        style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: 'center' }}
+                        style={{
+                          display: "flex",
+                          gap: 6,
+                          flexWrap: "wrap",
+                          alignItems: "center",
+                        }}
                       >
                         <ActionBtn
                           label="승인"
@@ -491,8 +545,7 @@ export default function TeacherAbsences() {
                           lineHeight: 1.25,
                           whiteSpace: "normal",
                         }}
-                      >
-                      </div>
+                      ></div>
                     </Td>
                   </tr>
 
