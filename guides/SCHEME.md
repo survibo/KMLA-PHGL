@@ -10,6 +10,7 @@
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 DROP TABLE IF EXISTS public.absences CASCADE;
 DROP TABLE IF EXISTS public.events CASCADE;
+DROP TABLE IF EXISTS public.weekly_reflections CASCADE;
 DROP TABLE IF EXISTS public.audit_logs CASCADE;
 DROP TABLE IF EXISTS public.profiles CASCADE;
 DROP FUNCTION IF EXISTS public.handle_new_user() CASCADE;
@@ -17,6 +18,7 @@ DROP FUNCTION IF EXISTS public.is_teacher() CASCADE;
 DROP FUNCTION IF EXISTS public.handle_profile_update() CASCADE;
 DROP FUNCTION IF EXISTS public.handle_absence_write() CASCADE;
 DROP FUNCTION IF EXISTS public.update_events_timestamp() CASCADE;
+DROP FUNCTION IF EXISTS public.update_weekly_reflections_timestamp() CASCADE;
 DROP FUNCTION IF EXISTS public.handle_audit_log() CASCADE;
 DROP TYPE IF EXISTS public.user_role CASCADE;
 DROP TYPE IF EXISTS public.absence_status CASCADE;
@@ -192,6 +194,43 @@ FOR EACH ROW
 EXECUTE FUNCTION public.handle_absence_write();
 
 -- =====================================================
+-- WEEKLY REFLECTIONS
+-- =====================================================
+CREATE TABLE public.weekly_reflections (
+  id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  owner_id UUID NOT NULL
+    DEFAULT auth.uid()
+    REFERENCES public.profiles(id) ON DELETE CASCADE,
+
+  week_start DATE NOT NULL,
+  content    TEXT NOT NULL,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  UNIQUE (owner_id, week_start)  -- 주당 1개 강제
+);
+
+CREATE INDEX idx_weekly_reflections_owner_week
+  ON public.weekly_reflections(owner_id, week_start);
+
+CREATE FUNCTION public.update_weekly_reflections_timestamp()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+BEGIN
+  new.updated_at := now();
+  RETURN new;
+END;
+$$;
+
+CREATE TRIGGER trg_weekly_reflections_before_update
+BEFORE UPDATE ON public.weekly_reflections
+FOR EACH ROW
+EXECUTE FUNCTION public.update_weekly_reflections_timestamp();
+
+-- =====================================================
 -- AUDIT LOGS
 -- =====================================================
 CREATE TABLE public.audit_logs (
@@ -204,11 +243,11 @@ CREATE TABLE public.audit_logs (
   changed_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_audit_logs_table    ON public.audit_logs(table_name);
+CREATE INDEX idx_audit_logs_table      ON public.audit_logs(table_name);
 CREATE INDEX idx_audit_logs_changed_at ON public.audit_logs(changed_at DESC);
 
 -- =====================================================
--- AUDIT 트리거 함수 (events, absences 공용)
+-- AUDIT 트리거 함수 (events, absences, weekly_reflections 공용)
 -- =====================================================
 CREATE FUNCTION public.handle_audit_log()
 RETURNS TRIGGER
@@ -247,6 +286,12 @@ AFTER INSERT OR UPDATE OR DELETE ON public.profiles
 FOR EACH ROW
 EXECUTE FUNCTION public.handle_audit_log();
 
+-- weekly_reflections에 audit 트리거 등록
+CREATE TRIGGER trg_weekly_reflections_audit
+AFTER INSERT OR UPDATE OR DELETE ON public.weekly_reflections
+FOR EACH ROW
+EXECUTE FUNCTION public.handle_audit_log();
+
 -- =====================================================
 -- AUTH 연동
 -- =====================================================
@@ -275,10 +320,11 @@ EXECUTE FUNCTION public.handle_new_user();
 -- =====================================================
 -- RLS 활성화
 -- =====================================================
-ALTER TABLE public.profiles   ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.events     ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.absences   ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.profiles            ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.events              ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.absences            ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.weekly_reflections  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.audit_logs          ENABLE ROW LEVEL SECURITY;
 
 -- =====================================================
 -- PROFILES RLS
@@ -315,4 +361,15 @@ WITH CHECK (student_id = auth.uid());
 
 CREATE POLICY absences_update
 ON public.absences FOR UPDATE
+USING (public.is_teacher());
+
+-- =====================================================
+-- WEEKLY REFLECTIONS RLS
+-- =====================================================
+CREATE POLICY reflections_own_all
+ON public.weekly_reflections FOR ALL
+USING (owner_id = auth.uid());
+
+CREATE POLICY reflections_teacher_select
+ON public.weekly_reflections FOR SELECT
 USING (public.is_teacher());

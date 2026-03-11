@@ -74,7 +74,7 @@ export default function Pending() {
           <div>
             <div style={{ fontSize: 22, fontWeight: 900 }}>승인 대기</div>
             <div style={{ marginTop: 6, fontSize: 13, color: "var(--text-muted)" }}>
-              선생님 승인 후 이용 가능합니다.
+              선생님 승인 후 이용 가능합니다. <br /> 현재 가입 기간이 아닙니다.
             </div>
           </div>
 
