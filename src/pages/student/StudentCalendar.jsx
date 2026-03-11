@@ -899,7 +899,7 @@ export default function StudentCalendar() {
               : ""}
           </div>
           <button className="c-ctl c-btn" type="button" onClick={openAddModal}>
-            {viewMode === "todo" ? "할 일 추가" : "일정 추가"}
+            일정 추가
           </button>
         </div>
 
@@ -910,7 +910,7 @@ export default function StudentCalendar() {
             </div>
           ) : selectedList.length === 0 ? (
             <div style={{ color: "var(--text-muted)", fontSize: 13 }}>
-              {viewMode === "todo" ? "체크할 할 일이 없음" : "등록된 학습 없음"}
+              등록된 학습 없음
             </div>
           ) : (
             <div className="l-section">
