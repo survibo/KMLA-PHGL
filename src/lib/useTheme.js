@@ -21,6 +21,13 @@ export function useTheme() {
     return t;
   });
 
+  function setThemeDirect(next) {
+    if (next !== "dark" && next !== "light") return;
+    localStorage.setItem(KEY, next);
+    applyTheme(next);
+    setTheme(next);
+  }
+
   function toggleTheme() {
     setTheme((prev) => {
       const next = prev === "dark" ? "light" : "dark";
@@ -30,5 +37,5 @@ export function useTheme() {
     });
   }
 
-  return { theme, toggleTheme };
+  return { theme, toggleTheme, setTheme: setThemeDirect };
 }

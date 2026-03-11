@@ -57,7 +57,7 @@ export default function TeacherAbsences() {
     const { data: absences, error: aErr } = await supabase
       .from("absences")
       .select(
-        "id, student_id, date, reason, status, created_at, status_updated_by, status_updated_at"
+        "id, student_id, date, reason, status, created_at, status_updated_by, status_updated_at",
       )
       .order("created_at", { ascending: false });
 
@@ -95,9 +95,9 @@ export default function TeacherAbsences() {
         ...a,
         student: map.get(a.student_id) ?? null,
         actor: a.status_updated_by
-          ? map.get(a.status_updated_by) ?? null
+          ? (map.get(a.status_updated_by) ?? null)
           : null,
-      }))
+      })),
     );
 
     setLoading(false);
@@ -142,7 +142,7 @@ export default function TeacherAbsences() {
     XLSX.utils.book_append_sheet(wb, ws, "결석목록");
     XLSX.writeFile(
       wb,
-      `결석목록_${new Date().toISOString().slice(0, 10)}.xlsx`
+      `결석목록_${new Date().toISOString().slice(0, 10)}.xlsx`,
     );
   }
 
@@ -154,11 +154,11 @@ export default function TeacherAbsences() {
       nextStatus === "approved"
         ? "승인"
         : nextStatus === "rejected"
-        ? "거절"
-        : "대기";
+          ? "거절"
+          : "대기";
 
     const ok = window.confirm(
-      `${name} 학생의 결석 처리를 "${actionText}"로 하시겠습니까?`
+      `${name} 학생의 결석 처리를 "${actionText}"로 하시겠습니까?`,
     );
     if (!ok) return;
 
@@ -186,7 +186,7 @@ export default function TeacherAbsences() {
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       list = list.filter((r) =>
-        (r.student?.name ?? "").toLowerCase().includes(q)
+        (r.student?.name ?? "").toLowerCase().includes(q),
       );
     }
 
@@ -513,7 +513,7 @@ export default function TeacherAbsences() {
                             setStatusForAbsence(
                               r.id,
                               r.student?.name,
-                              "approved"
+                              "approved",
                             )
                           }
                         />
@@ -527,7 +527,7 @@ export default function TeacherAbsences() {
                             setStatusForAbsence(
                               r.id,
                               r.student?.name,
-                              "rejected"
+                              "rejected",
                             )
                           }
                         />
@@ -541,7 +541,7 @@ export default function TeacherAbsences() {
                             setStatusForAbsence(
                               r.id,
                               r.student?.name,
-                              "pending"
+                              "pending",
                             )
                           }
                         />
