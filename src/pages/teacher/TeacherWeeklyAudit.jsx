@@ -302,12 +302,12 @@ function AuditTable({ rows }) {
         }}
       >
         <colgroup>
-          <col style={{ width: "9%" }} />   {/* 반 */}
-          <col style={{ width: "19%" }} />  {/* 이름 */}
-          <col style={{ width: "12%" }} />  {/* 학번(6자리 고려) */}
-          <col style={{ width: "20%" }} />  {/* 총 합 */}
-          <col style={{ width: "20%" }} />  {/* 기초 역량 강화 */}
-          <col style={{ width: "20%" }} />  {/* 진로 탐색 */}
+          <col style={{ width: "9%" }} />   
+          <col style={{ width: "19%" }} /> 
+          <col style={{ width: "12%" }} />  
+          <col style={{ width: "20%" }} />  
+          <col style={{ width: "20%" }} />  
+          <col style={{ width: "20%" }} />  
         </colgroup>
 
         <thead>
