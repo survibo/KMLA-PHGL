@@ -3,10 +3,12 @@ import { useState } from "react";
 const KEY = "phgl_calendar_view_mode"; // "classic" | "todo"
 
 function normalizeMode(value) {
-  return value === "classic" ? "classic" : "todo";
+  return value === "todo" ? "todo" : "classic";
 }
 
 function getInitialMode() {
+  if (typeof window === "undefined") return "classic";
+
   return normalizeMode(localStorage.getItem(KEY));
 }
 

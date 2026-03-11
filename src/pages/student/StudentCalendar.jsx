@@ -79,7 +79,7 @@ async function fetchWeekEvents({ uid, weekStartISO, weekEndISO }) {
   const { data, error } = await supabase
     .from("events")
     .select(
-      "id, owner_id, title, description, category, date, duration_min, is_done, created_at",
+      "id, owner_id, title, description, category, date, duration_min, is_done, created_at"
     )
     .eq("owner_id", uid)
     .gte("date", weekStartISO)
@@ -106,6 +106,9 @@ async function updateEventDoneById({ id, isDone }) {
     .from("events")
     .update({ is_done: isDone })
     .eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
 async function fetchReflection({ uid, weekStartISO }) {
   const { data, error } = await supabase
     .from("weekly_reflections")
@@ -320,7 +323,10 @@ function TodoItem({ event, checked, onToggle, onDelete, disabled }) {
             gap: 10,
             cursor: "pointer",
             flex: 1,
+            userSelect: "none",
+            WebkitTapHighlightColor: "transparent",
           }}
+          onMouseDown={(e) => e.preventDefault()}
         >
           <input
             type="checkbox"
@@ -499,11 +505,11 @@ export default function StudentCalendar() {
   const thisMonday = useMemo(() => startOfWeekMonday(new Date()), []);
   const minMonday = useMemo(
     () => addDays(thisMonday, WEEK_LIMIT.prev),
-    [thisMonday],
+    [thisMonday]
   );
   const maxMonday = useMemo(
     () => addDays(thisMonday, WEEK_LIMIT.next),
-    [thisMonday],
+    [thisMonday]
   );
 
   const [weekBase, setWeekBase] = useState(() => startOfWeekMonday(new Date()));
@@ -512,7 +518,7 @@ export default function StudentCalendar() {
   const monday = useMemo(() => startOfWeekMonday(weekBase), [weekBase]);
   const weekDays = useMemo(
     () => Array.from({ length: 7 }, (_, i) => addDays(monday, i)),
-    [monday],
+    [monday]
   );
 
   const canPrev = monday.getTime() > minMonday.getTime();
@@ -549,12 +555,15 @@ export default function StudentCalendar() {
           events
             .filter((ev) => ev.category === cat)
             .reduce((sum, ev) => sum + (ev.duration_min || 0), 0),
-        ]),
+        ])
       ),
-    [events],
+    [events]
   );
 
-  const selectedList = eventsByDate.get(selectedISO) ?? [];
+  const selectedList = useMemo(
+    () => eventsByDate.get(selectedISO) ?? [],
+    [eventsByDate, selectedISO]
+  );
   const [togglingMap, setTogglingMap] = useState({});
 
   // ── 주 이동 ──
@@ -574,8 +583,8 @@ export default function StudentCalendar() {
     setTogglingMap((prev) => ({ ...prev, [eventId]: true }));
     setEvents((prev) =>
       prev.map((ev) =>
-        ev.id === eventId ? { ...ev, is_done: nextChecked } : ev,
-      ),
+        ev.id === eventId ? { ...ev, is_done: nextChecked } : ev
+      )
     );
 
     try {
@@ -583,8 +592,8 @@ export default function StudentCalendar() {
     } catch (err) {
       setEvents((prev) =>
         prev.map((ev) =>
-          ev.id === eventId ? { ...ev, is_done: !nextChecked } : ev,
-        ),
+          ev.id === eventId ? { ...ev, is_done: !nextChecked } : ev
+        )
       );
       window.alert(err.message);
     } finally {
@@ -598,7 +607,7 @@ export default function StudentCalendar() {
 
   const selectedDoneCount = useMemo(
     () => selectedList.filter((ev) => Boolean(ev.is_done)).length,
-    [selectedList],
+    [selectedList]
   );
 
   // ── 이벤트 추가 모달 상태 ──
@@ -614,8 +623,8 @@ export default function StudentCalendar() {
       field === "title"
         ? v.slice(0, TITLE_MAX)
         : field === "description"
-          ? v.slice(0, DESC_MAX)
-          : v;
+        ? v.slice(0, DESC_MAX)
+        : v;
 
     setDraft((prev) => ({ ...prev, [field]: limited }));
   };
@@ -1032,7 +1041,7 @@ export default function StudentCalendar() {
       <Modal
         open={addOpen}
         title={`${DOW[selectedIdx]}요일 (${formatKoreanMD(
-          selectedDate,
+          selectedDate
         )}) 일정 추가`}
         onClose={() => setAddOpen(false)}
       >
