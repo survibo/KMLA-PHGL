@@ -76,9 +76,15 @@ export default function Login() {
               opacity: 0.8,
             }}
           >
-            KMLA 과학기술부에서 제작한 PHGL 웹사이트입니다.
+            KMLA 과학기술부(김서혁,신민기)에서 제작한 PHGL 웹사이트입니다.
             <br />
-            <a href="https://www.facebook.com/survibo" target="blank" rel="noopener noreferrer">관련 기술 문의는 <b>여기</b>로 해주시기 바랍니다.</a>
+            <a
+              href="https://www.facebook.com/survibo"
+              target="blank"
+              rel="noopener noreferrer"
+            >
+              관련 기술 문의는 <b>여기</b>로 해주시기 바랍니다.
+            </a>
           </div>
         </div>
       </div>

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import { useMyProfile } from "../../hooks/useMyProfile";
 import { useNetworkStatus } from "../../hooks/useNetworkStatus";
+import { useCalendarView } from "../../lib/useCalendarView";
 import {
   addDays,
   formatKoreanMD,
@@ -78,7 +79,7 @@ async function fetchWeekEvents({ uid, weekStartISO, weekEndISO }) {
   const { data, error } = await supabase
     .from("events")
     .select(
-      "id, owner_id, title, description, category, date, duration_min, created_at"
+      "id, owner_id, title, description, category, date, duration_min, is_done, created_at",
     )
     .eq("owner_id", uid)
     .gte("date", weekStartISO)
@@ -100,6 +101,11 @@ async function deleteEventById(id) {
   if (error) throw new Error(error.message);
 }
 
+async function updateEventDoneById({ id, isDone }) {
+  const { error } = await supabase
+    .from("events")
+    .update({ is_done: isDone })
+    .eq("id", id);
 async function fetchReflection({ uid, weekStartISO }) {
   const { data, error } = await supabase
     .from("weekly_reflections")
@@ -148,7 +154,7 @@ function useWeekEvents({ uid, weekStartISO, weekEndISO }) {
     load();
   }, [load]);
 
-  return { events, fetching, error, reload: load };
+  return { events, setEvents, fetching, error, reload: load };
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -294,6 +300,110 @@ function EventCard({ event, onDelete }) {
   );
 }
 
+function TodoItem({ event, checked, onToggle, onDelete, disabled }) {
+  return (
+    <div
+      className="u-panel"
+      style={{
+        background: "var(--bg-2)",
+        padding: 12,
+        borderRadius: "var(--radius-2)",
+      }}
+    >
+      <div
+        style={{ display: "flex", justifyContent: "space-between", gap: 10 }}
+      >
+        <label
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 10,
+            cursor: "pointer",
+            flex: 1,
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={checked}
+            onChange={(e) => onToggle(event.id, e.target.checked)}
+            disabled={disabled}
+            style={{ marginTop: 3 }}
+          />
+          <div style={{ color: "var(--text-1)" }}>
+            <div
+              style={{
+                display: "flex",
+                gap: 8,
+                alignItems: "center",
+                flexWrap: "wrap",
+              }}
+            >
+              <span
+                className="u-panel"
+                style={{
+                  borderRadius: 999,
+                  padding: "2px 8px",
+                  fontSize: 12,
+                  background: "var(--bg-1)",
+                  textDecoration: "none",
+                }}
+              >
+                {event.category}
+              </span>
+              <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                {formatMinutesAsHM(event.duration_min)}
+              </span>
+            </div>
+
+            <div
+              style={{
+                marginTop: 6,
+                fontWeight: 900,
+                color: checked ? "var(--text-muted)" : "var(--text-1)",
+                textDecoration: checked ? "line-through" : "none",
+              }}
+            >
+              {event.title}
+            </div>
+
+            {event.description && (
+              <div
+                style={{
+                  marginTop: 6,
+                  color: "var(--text-muted)",
+                  fontSize: 13,
+                  whiteSpace: "pre-wrap",
+                  textDecoration: checked ? "line-through" : "none",
+                }}
+              >
+                {event.description}
+              </div>
+            )}
+          </div>
+        </label>
+
+        <button
+          className="c-ctl c-btn c-btn--danger"
+          type="button"
+          onClick={() => onDelete(event.id)}
+          style={{
+            width: 60,
+            height: 32,
+            flex: "0 0 auto",
+            whiteSpace: "nowrap",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 0,
+          }}
+        >
+          삭제
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function AddEventForm({ draft, onChange, onSubmit, onCancel, saving, error }) {
   return (
     <div className="l-section">
@@ -383,16 +493,17 @@ export default function StudentCalendar() {
   const { session, loading } = useMyProfile();
   const uid = session?.user?.id;
   const isOnline = useNetworkStatus();
+  const { viewMode } = useCalendarView();
 
   // ── 주 탐색 상태 ──
   const thisMonday = useMemo(() => startOfWeekMonday(new Date()), []);
   const minMonday = useMemo(
     () => addDays(thisMonday, WEEK_LIMIT.prev),
-    [thisMonday]
+    [thisMonday],
   );
   const maxMonday = useMemo(
     () => addDays(thisMonday, WEEK_LIMIT.next),
-    [thisMonday]
+    [thisMonday],
   );
 
   const [weekBase, setWeekBase] = useState(() => startOfWeekMonday(new Date()));
@@ -401,7 +512,7 @@ export default function StudentCalendar() {
   const monday = useMemo(() => startOfWeekMonday(weekBase), [weekBase]);
   const weekDays = useMemo(
     () => Array.from({ length: 7 }, (_, i) => addDays(monday, i)),
-    [monday]
+    [monday],
   );
 
   const canPrev = monday.getTime() > minMonday.getTime();
@@ -416,6 +527,7 @@ export default function StudentCalendar() {
   // ── 이벤트 데이터 ──
   const {
     events,
+    setEvents,
     fetching,
     error: fetchError,
     reload,
@@ -437,12 +549,13 @@ export default function StudentCalendar() {
           events
             .filter((ev) => ev.category === cat)
             .reduce((sum, ev) => sum + (ev.duration_min || 0), 0),
-        ])
+        ]),
       ),
-    [events]
+    [events],
   );
 
   const selectedList = eventsByDate.get(selectedISO) ?? [];
+  const [togglingMap, setTogglingMap] = useState({});
 
   // ── 주 이동 ──
   const navigateWeek = (offset) => {
@@ -454,6 +567,39 @@ export default function StudentCalendar() {
     setSelectedIdx(getTodayDowIndex());
     setWeekBase(startOfWeekMonday(new Date()));
   };
+
+  const toggleChecked = async (eventId, nextChecked) => {
+    if (togglingMap[eventId]) return;
+
+    setTogglingMap((prev) => ({ ...prev, [eventId]: true }));
+    setEvents((prev) =>
+      prev.map((ev) =>
+        ev.id === eventId ? { ...ev, is_done: nextChecked } : ev,
+      ),
+    );
+
+    try {
+      await updateEventDoneById({ id: eventId, isDone: nextChecked });
+    } catch (err) {
+      setEvents((prev) =>
+        prev.map((ev) =>
+          ev.id === eventId ? { ...ev, is_done: !nextChecked } : ev,
+        ),
+      );
+      window.alert(err.message);
+    } finally {
+      setTogglingMap((prev) => {
+        const next = { ...prev };
+        delete next[eventId];
+        return next;
+      });
+    }
+  };
+
+  const selectedDoneCount = useMemo(
+    () => selectedList.filter((ev) => Boolean(ev.is_done)).length,
+    [selectedList],
+  );
 
   // ── 이벤트 추가 모달 상태 ──
   const [addOpen, setAddOpen] = useState(false);
@@ -468,8 +614,8 @@ export default function StudentCalendar() {
       field === "title"
         ? v.slice(0, TITLE_MAX)
         : field === "description"
-        ? v.slice(0, DESC_MAX)
-        : v;
+          ? v.slice(0, DESC_MAX)
+          : v;
 
     setDraft((prev) => ({ ...prev, [field]: limited }));
   };
@@ -519,6 +665,7 @@ export default function StudentCalendar() {
         title: draft.title.trim(),
         description: draft.description.trim() || null,
         duration_min: minutes,
+        is_done: false,
       });
       setAddOpen(false);
       await reload();
@@ -738,9 +885,12 @@ export default function StudentCalendar() {
         >
           <div style={{ fontWeight: 900 }}>
             {DOW[selectedIdx]}요일 · {formatKoreanMD(selectedDate)}
+            {viewMode === "todo"
+              ? ` · 완료 ${selectedDoneCount}/${selectedList.length}`
+              : ""}
           </div>
           <button className="c-ctl c-btn" type="button" onClick={openAddModal}>
-            일정 추가
+            {viewMode === "todo" ? "할 일 추가" : "일정 추가"}
           </button>
         </div>
 
@@ -751,17 +901,28 @@ export default function StudentCalendar() {
             </div>
           ) : selectedList.length === 0 ? (
             <div style={{ color: "var(--text-muted)", fontSize: 13 }}>
-              등록된 학습 없음
+              {viewMode === "todo" ? "체크할 할 일이 없음" : "등록된 학습 없음"}
             </div>
           ) : (
             <div className="l-section">
-              {selectedList.map((ev) => (
-                <EventCard
-                  key={ev.id}
-                  event={ev}
-                  onDelete={handleDeleteEvent}
-                />
-              ))}
+              {viewMode === "todo"
+                ? selectedList.map((ev) => (
+                    <TodoItem
+                      key={ev.id}
+                      event={ev}
+                      checked={Boolean(ev.is_done)}
+                      onToggle={toggleChecked}
+                      onDelete={handleDeleteEvent}
+                      disabled={Boolean(togglingMap[ev.id])}
+                    />
+                  ))
+                : selectedList.map((ev) => (
+                    <EventCard
+                      key={ev.id}
+                      event={ev}
+                      onDelete={handleDeleteEvent}
+                    />
+                  ))}
             </div>
           )}
         </div>
@@ -871,7 +1032,7 @@ export default function StudentCalendar() {
       <Modal
         open={addOpen}
         title={`${DOW[selectedIdx]}요일 (${formatKoreanMD(
-          selectedDate
+          selectedDate,
         )}) 일정 추가`}
         onClose={() => setAddOpen(false)}
       >

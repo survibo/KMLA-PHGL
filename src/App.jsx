@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import Login from "./pages/Login";
 import StudentCalendar from "./pages/student/StudentCalendar";
 import StudentAbsence from "./pages/student/StudentAbsence";
+import StudentSettings from "./pages/student/StudentSettings";
 import NotFound from "./pages/error/NotFound";
 import AuthCallback from "./pages/AuthCallback";
 import MyProfile from "./pages/MyProfile";
@@ -45,6 +46,16 @@ export default function App() {
           <ProtectedRoute allowRole="student">
             <StudentLayout>
               <StudentAbsence />
+            </StudentLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/student/settings"
+        element={
+          <ProtectedRoute allowRole="student">
+            <StudentLayout>
+              <StudentSettings />
             </StudentLayout>
           </ProtectedRoute>
         }
