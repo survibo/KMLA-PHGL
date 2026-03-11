@@ -57,6 +57,21 @@ function getTodayDowIndex() {
   return Math.max(0, Math.min(6, diff));
 }
 
+/** ISO 날짜/시간 → "yyyy-mm-dd hh:mm" */
+function formatRequestedAt(iso) {
+  if (!iso) return "-";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "-";
+
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mi = String(d.getMinutes()).padStart(2, "0");
+
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
+}
+
 // ─── Supabase API ─────────────────────────────────────────────────────────────
 
 async function fetchWeekEvents({ uid, weekStartISO, weekEndISO }) {
@@ -82,6 +97,28 @@ async function insertEvent(payload) {
 
 async function deleteEventById(id) {
   const { error } = await supabase.from("events").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+async function fetchReflection({ uid, weekStartISO }) {
+  const { data, error } = await supabase
+    .from("weekly_reflections")
+    .select("id, content, updated_at")
+    .eq("owner_id", uid)
+    .eq("week_start", weekStartISO)
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+  return data ?? null;
+}
+
+async function upsertReflection({ uid, weekStartISO, content }) {
+  const { error } = await supabase
+    .from("weekly_reflections")
+    .upsert(
+      { owner_id: uid, week_start: weekStartISO, content },
+      { onConflict: "owner_id,week_start" }
+    );
   if (error) throw new Error(error.message);
 }
 
@@ -115,6 +152,7 @@ function useWeekEvents({ uid, weekStartISO, weekEndISO }) {
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
+
 function CharCount({ value, max }) {
   const len = (value ?? "").length;
   const over = len > max;
@@ -243,7 +281,6 @@ function EventCard({ event, onDelete }) {
             height: 32,
             flex: "0 0 auto",
             whiteSpace: "nowrap",
-
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -504,6 +541,44 @@ export default function StudentCalendar() {
     }
   };
 
+  // ── 주간 성찰 ──
+  const [reflection, setReflection] = useState(null);
+  const [refDraft, setRefDraft] = useState("");
+  const [refSaving, setRefSaving] = useState(false);
+  const [refError, setRefError] = useState("");
+  const [refEditing, setRefEditing] = useState(false);
+
+  useEffect(() => {
+    if (!uid) return;
+    setReflection(null);
+    setRefDraft("");
+    setRefEditing(false);
+    setRefError("");
+
+    fetchReflection({ uid, weekStartISO })
+      .then((data) => {
+        setReflection(data);
+        setRefDraft(data?.content ?? "");
+      })
+      .catch((err) => setRefError(err.message));
+  }, [uid, weekStartISO]);
+
+  const handleSaveReflection = async () => {
+    if (!refDraft.trim()) return;
+    setRefSaving(true);
+    setRefError("");
+    try {
+      await upsertReflection({ uid, weekStartISO, content: refDraft.trim() });
+      const updated = await fetchReflection({ uid, weekStartISO });
+      setReflection(updated);
+      setRefEditing(false); // 저장 후 읽기 모드로
+    } catch (err) {
+      setRefError(err.message);
+    } finally {
+      setRefSaving(false);
+    }
+  };
+
   // ── 렌더 ──
   if (loading) {
     return (
@@ -687,6 +762,106 @@ export default function StudentCalendar() {
                   onDelete={handleDeleteEvent}
                 />
               ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── 주간 성찰 ── */}
+      <div className="u-panel" style={{ padding: 14 }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: 10,
+          }}
+        >
+          <div style={{ fontWeight: 900 }}>주간 성찰</div>
+          {reflection && !refEditing && (
+            <button
+              className="c-ctl c-btn"
+              type="button"
+              onClick={() => setRefEditing(true)}
+            >
+              수정
+            </button>
+          )}
+        </div>
+
+        {refError && (
+          <div className="u-alert u-alert--error" style={{ marginBottom: 10 }}>
+            {refError}
+          </div>
+        )}
+
+        {/* 읽기 모드 */}
+        {reflection && !refEditing ? (
+          <div
+            style={{
+              whiteSpace: "pre-wrap",
+              fontSize: 13,
+              color: "var(--text-2)",
+              lineHeight: 1.6,
+              padding: "8px 12px",
+              borderLeft: "3px solid var(--border-focus)",
+            }}
+          >
+            {reflection.content}
+          </div>
+        ) : (
+          /* 편집 모드 */
+          <textarea
+            className="c-ctl c-textarea"
+            rows={5}
+            value={refDraft}
+            onChange={(e) => setRefDraft(e.target.value)}
+            placeholder="이번 주를 돌아보며 느낀 점을 작성해주세요."
+            autoFocus={refEditing}
+          />
+        )}
+
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginTop: 8,
+          }}
+        >
+          <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+            {reflection?.updated_at
+              ? `마지막 저장: ${formatRequestedAt(reflection.updated_at)}`
+              : "아직 작성되지 않았습니다."}
+          </div>
+
+          {(!reflection || refEditing) && (
+            <div style={{ display: "flex", gap: 8 }}>
+              {refEditing && (
+                <button
+                  className="c-ctl c-btn"
+                  type="button"
+                  onClick={() => {
+                    setRefDraft(reflection?.content ?? "");
+                    setRefEditing(false);
+                  }}
+                  disabled={refSaving}
+                >
+                  취소
+                </button>
+              )}
+              <button
+                className="c-ctl c-btn"
+                type="button"
+                onClick={handleSaveReflection}
+                disabled={
+                  refSaving ||
+                  !refDraft.trim() ||
+                  refDraft.trim() === reflection?.content
+                }
+              >
+                {refSaving ? "저장 중..." : "저장"}
+              </button>
             </div>
           )}
         </div>
