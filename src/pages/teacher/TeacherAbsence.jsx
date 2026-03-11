@@ -256,6 +256,16 @@ export default function TeacherAbsences() {
 
   return (
     <div className="l-page">
+      <style>{`
+        @media (max-width: 500px) {
+          .col-hide { display: none; }
+          .col-student { width: 22% !important; }
+          .col-date    { width: 28% !important; }
+          .col-created { width: 28% !important; }
+          .col-action  { width: 22% !important; }
+        }
+      `}</style>
+
       <div className="u-panel" style={{ padding: 14 }}>
         <div
           style={{
@@ -381,24 +391,24 @@ export default function TeacherAbsences() {
           }}
         >
           <colgroup>
-            <col style={{ width: "14%" }} /> {/* 학생 */}
-            <col style={{ width: "6%" }} /> {/* 반 */}
-            <col style={{ width: "9%" }} /> {/* 번호 */}
-            <col style={{ width: "13%" }} /> {/* 날짜 */}
-            <col style={{ width: "16%" }} /> {/* 요청일 */}
-            <col style={{ width: "16%" }} /> {/* 마지막 처리자 */}
-            <col style={{ width: "26%" }} /> {/* 처리 */}
+            <col className="col-student" style={{ width: "14%" }} />
+            <col className="col-hide" style={{ width: "6%" }} />
+            <col className="col-hide" style={{ width: "9%" }} />
+            <col className="col-date" style={{ width: "13%" }} />
+            <col className="col-created" style={{ width: "16%" }} />
+            <col className="col-hide" style={{ width: "16%" }} />
+            <col className="col-action" style={{ width: "26%" }} />
           </colgroup>
 
           <thead>
             <tr style={{ background: "var(--bg-2)" }}>
-              <Th>학생</Th>
-              <Th>반</Th>
-              <Th>번호</Th>
-              <Th>날짜</Th>
-              <Th>요청일</Th>
-              <Th>마지막 처리자</Th>
-              <Th>처리</Th>
+              <Th className="col-student">학생</Th>
+              <Th className="col-hide">반</Th>
+              <Th className="col-hide">번호</Th>
+              <Th className="col-date">날짜</Th>
+              <Th className="col-created">요청일</Th>
+              <Th className="col-hide">마지막 처리자</Th>
+              <Th className="col-action">처리</Th>
             </tr>
           </thead>
 
@@ -417,7 +427,7 @@ export default function TeacherAbsences() {
                     key={r.id}
                     style={{ borderTop: `1px solid var(--border-focus)` }}
                   >
-                    <Td strong>
+                    <Td strong className="col-student">
                       <div
                         style={{
                           overflow: "hidden",
@@ -430,21 +440,21 @@ export default function TeacherAbsences() {
                       </div>
                     </Td>
 
-                    <Td>
+                    <Td className="col-hide">
                       <div
                         style={{ overflow: "hidden", textOverflow: "ellipsis" }}
                       >
                         {r.student?.class_no ?? "-"}
                       </div>
                     </Td>
-                    <Td>
+                    <Td className="col-hide">
                       <div
                         style={{ overflow: "hidden", textOverflow: "ellipsis" }}
                       >
                         {r.student?.student_no ?? "-"}
                       </div>
                     </Td>
-                    <Td>
+                    <Td className="col-date">
                       <div
                         style={{ overflow: "hidden", textOverflow: "ellipsis" }}
                       >
@@ -452,7 +462,7 @@ export default function TeacherAbsences() {
                       </div>
                     </Td>
 
-                    <Td>
+                    <Td className="col-created">
                       <div
                         style={{ overflow: "hidden", textOverflow: "ellipsis" }}
                         title={r.created_at ?? ""}
@@ -461,7 +471,7 @@ export default function TeacherAbsences() {
                       </div>
                     </Td>
 
-                    <Td>
+                    <Td className="col-hide">
                       <div
                         style={{
                           overflow: "hidden",
@@ -486,7 +496,7 @@ export default function TeacherAbsences() {
                       </div>
                     </Td>
 
-                    <Td>
+                    <Td className="col-action">
                       <div
                         style={{
                           display: "flex",
@@ -642,9 +652,10 @@ function ActionBtn({
   );
 }
 
-function Th({ children }) {
+function Th({ children, className }) {
   return (
     <th
+      className={className}
       style={{
         textAlign: "left",
         fontSize: 13,
@@ -661,9 +672,10 @@ function Th({ children }) {
   );
 }
 
-function Td({ children, strong = false }) {
+function Td({ children, strong = false, className }) {
   return (
     <td
+      className={className}
       style={{
         padding: "12px 14px",
         fontSize: 13,
