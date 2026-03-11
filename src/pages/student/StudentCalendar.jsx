@@ -610,7 +610,7 @@ export default function StudentCalendar() {
                   fontSize: 13,
                   fontWeight: isThisWeek ? 900 : 400,
                   color: isThisWeek ? "#166534" : "var(--text-muted)",
-                  background: isThisWeek
+                  background: isThisWeek 
                     ? "rgba(34, 197, 94, 0.12)"
                     : "transparent",
                   display: "inline-block",
