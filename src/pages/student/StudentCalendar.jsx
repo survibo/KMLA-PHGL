@@ -18,7 +18,6 @@ const DOW = ["월", "화", "수", "목", "금", "토", "일"];
 const WEEK_LIMIT = { prev: 0, next: 21 }; // 이전 1주 / 이후 3주
 const TITLE_MAX = 50;
 const DESC_MAX = 200;
-const TODO_KEY_PREFIX = "phgl_student_todo_checked";
 
 const DEFAULT_DRAFT = {
   category: CATEGORIES[0],
@@ -65,7 +64,7 @@ async function fetchWeekEvents({ uid, weekStartISO, weekEndISO }) {
   const { data, error } = await supabase
     .from("events")
     .select(
-      "id, owner_id, title, description, category, date, duration_min, created_at"
+      "id, owner_id, title, description, category, date, duration_min, is_done, created_at",
     )
     .eq("owner_id", uid)
     .gte("date", weekStartISO)
@@ -84,6 +83,14 @@ async function insertEvent(payload) {
 
 async function deleteEventById(id) {
   const { error } = await supabase.from("events").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+async function updateEventDoneById({ id, isDone }) {
+  const { error } = await supabase
+    .from("events")
+    .update({ is_done: isDone })
+    .eq("id", id);
   if (error) throw new Error(error.message);
 }
 
@@ -113,7 +120,7 @@ function useWeekEvents({ uid, weekStartISO, weekEndISO }) {
     load();
   }, [load]);
 
-  return { events, fetching, error, reload: load };
+  return { events, setEvents, fetching, error, reload: load };
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -259,7 +266,7 @@ function EventCard({ event, onDelete }) {
   );
 }
 
-function TodoItem({ event, checked, onToggle }) {
+function TodoItem({ event, checked, onToggle, onDelete, disabled }) {
   return (
     <div
       className="u-panel"
@@ -269,7 +276,9 @@ function TodoItem({ event, checked, onToggle }) {
         borderRadius: "var(--radius-2)",
       }}
     >
-      <div style={{ display: "flex", gap: 10 }}>
+      <div
+        style={{ display: "flex", justifyContent: "space-between", gap: 10 }}
+      >
         <label
           style={{
             display: "flex",
@@ -282,15 +291,11 @@ function TodoItem({ event, checked, onToggle }) {
           <input
             type="checkbox"
             checked={checked}
-            onChange={() => onToggle(event.id)}
+            onChange={(e) => onToggle(event.id, e.target.checked)}
+            disabled={disabled}
             style={{ marginTop: 3 }}
           />
-          <div
-            style={{
-              color: checked ? "var(--text-muted)" : "var(--text-1)",
-              textDecoration: checked ? "line-through" : "none",
-            }}
-          >
+          <div style={{ color: "var(--text-1)" }}>
             <div
               style={{
                 display: "flex",
@@ -316,7 +321,16 @@ function TodoItem({ event, checked, onToggle }) {
               </span>
             </div>
 
-            <div style={{ marginTop: 6, fontWeight: 900 }}>{event.title}</div>
+            <div
+              style={{
+                marginTop: 6,
+                fontWeight: 900,
+                color: checked ? "var(--text-muted)" : "var(--text-1)",
+                textDecoration: checked ? "line-through" : "none",
+              }}
+            >
+              {event.title}
+            </div>
 
             {event.description && (
               <div
@@ -325,6 +339,7 @@ function TodoItem({ event, checked, onToggle }) {
                   color: "var(--text-muted)",
                   fontSize: 13,
                   whiteSpace: "pre-wrap",
+                  textDecoration: checked ? "line-through" : "none",
                 }}
               >
                 {event.description}
@@ -333,6 +348,23 @@ function TodoItem({ event, checked, onToggle }) {
           </div>
         </label>
 
+        <button
+          className="c-ctl c-btn c-btn--danger"
+          type="button"
+          onClick={() => onDelete(event.id)}
+          style={{
+            width: 60,
+            height: 32,
+            flex: "0 0 auto",
+            whiteSpace: "nowrap",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 0,
+          }}
+        >
+          삭제
+        </button>
       </div>
     </div>
   );
@@ -433,11 +465,11 @@ export default function StudentCalendar() {
   const thisMonday = useMemo(() => startOfWeekMonday(new Date()), []);
   const minMonday = useMemo(
     () => addDays(thisMonday, WEEK_LIMIT.prev),
-    [thisMonday]
+    [thisMonday],
   );
   const maxMonday = useMemo(
     () => addDays(thisMonday, WEEK_LIMIT.next),
-    [thisMonday]
+    [thisMonday],
   );
 
   const [weekBase, setWeekBase] = useState(() => startOfWeekMonday(new Date()));
@@ -446,7 +478,7 @@ export default function StudentCalendar() {
   const monday = useMemo(() => startOfWeekMonday(weekBase), [weekBase]);
   const weekDays = useMemo(
     () => Array.from({ length: 7 }, (_, i) => addDays(monday, i)),
-    [monday]
+    [monday],
   );
 
   const canPrev = monday.getTime() > minMonday.getTime();
@@ -461,6 +493,7 @@ export default function StudentCalendar() {
   // ── 이벤트 데이터 ──
   const {
     events,
+    setEvents,
     fetching,
     error: fetchError,
     reload,
@@ -482,17 +515,13 @@ export default function StudentCalendar() {
           events
             .filter((ev) => ev.category === cat)
             .reduce((sum, ev) => sum + (ev.duration_min || 0), 0),
-        ])
+        ]),
       ),
-    [events]
+    [events],
   );
 
   const selectedList = eventsByDate.get(selectedISO) ?? [];
-  const todoStorageKey = useMemo(
-    () => `${TODO_KEY_PREFIX}_${uid ?? "guest"}`,
-    [uid]
-  );
-  const [checkedMap, setCheckedMap] = useState({});
+  const [togglingMap, setTogglingMap] = useState({});
 
   // ── 주 이동 ──
   const navigateWeek = (offset) => {
@@ -505,31 +534,37 @@ export default function StudentCalendar() {
     setWeekBase(startOfWeekMonday(new Date()));
   };
 
-  useEffect(() => {
-    const raw = localStorage.getItem(todoStorageKey);
-    if (!raw) {
-      setCheckedMap({});
-      return;
-    }
-    try {
-      const parsed = JSON.parse(raw);
-      setCheckedMap(parsed && typeof parsed === "object" ? parsed : {});
-    } catch {
-      setCheckedMap({});
-    }
-  }, [todoStorageKey]);
+  const toggleChecked = async (eventId, nextChecked) => {
+    if (togglingMap[eventId]) return;
 
-  const toggleChecked = (eventId) => {
-    setCheckedMap((prev) => {
-      const next = { ...prev, [eventId]: !prev[eventId] };
-      localStorage.setItem(todoStorageKey, JSON.stringify(next));
-      return next;
-    });
+    setTogglingMap((prev) => ({ ...prev, [eventId]: true }));
+    setEvents((prev) =>
+      prev.map((ev) =>
+        ev.id === eventId ? { ...ev, is_done: nextChecked } : ev,
+      ),
+    );
+
+    try {
+      await updateEventDoneById({ id: eventId, isDone: nextChecked });
+    } catch (err) {
+      setEvents((prev) =>
+        prev.map((ev) =>
+          ev.id === eventId ? { ...ev, is_done: !nextChecked } : ev,
+        ),
+      );
+      window.alert(err.message);
+    } finally {
+      setTogglingMap((prev) => {
+        const next = { ...prev };
+        delete next[eventId];
+        return next;
+      });
+    }
   };
 
   const selectedDoneCount = useMemo(
-    () => selectedList.filter((ev) => checkedMap[ev.id]).length,
-    [selectedList, checkedMap]
+    () => selectedList.filter((ev) => Boolean(ev.is_done)).length,
+    [selectedList],
   );
 
   // ── 이벤트 추가 모달 상태 ──
@@ -545,8 +580,8 @@ export default function StudentCalendar() {
       field === "title"
         ? v.slice(0, TITLE_MAX)
         : field === "description"
-        ? v.slice(0, DESC_MAX)
-        : v;
+          ? v.slice(0, DESC_MAX)
+          : v;
 
     setDraft((prev) => ({ ...prev, [field]: limited }));
   };
@@ -596,6 +631,7 @@ export default function StudentCalendar() {
         title: draft.title.trim(),
         description: draft.description.trim() || null,
         duration_min: minutes,
+        is_done: false,
       });
       setAddOpen(false);
       await reload();
@@ -777,7 +813,9 @@ export default function StudentCalendar() {
         >
           <div style={{ fontWeight: 900 }}>
             {DOW[selectedIdx]}요일 · {formatKoreanMD(selectedDate)}
-            {viewMode === "todo" ? ` · 완료 ${selectedDoneCount}/${selectedList.length}` : ""}
+            {viewMode === "todo"
+              ? ` · 완료 ${selectedDoneCount}/${selectedList.length}`
+              : ""}
           </div>
           <button className="c-ctl c-btn" type="button" onClick={openAddModal}>
             {viewMode === "todo" ? "할 일 추가" : "일정 추가"}
@@ -800,8 +838,10 @@ export default function StudentCalendar() {
                     <TodoItem
                       key={ev.id}
                       event={ev}
-                      checked={Boolean(checkedMap[ev.id])}
+                      checked={Boolean(ev.is_done)}
                       onToggle={toggleChecked}
+                      onDelete={handleDeleteEvent}
+                      disabled={Boolean(togglingMap[ev.id])}
                     />
                   ))
                 : selectedList.map((ev) => (
@@ -820,7 +860,7 @@ export default function StudentCalendar() {
       <Modal
         open={addOpen}
         title={`${DOW[selectedIdx]}요일 (${formatKoreanMD(
-          selectedDate
+          selectedDate,
         )}) 일정 추가`}
         onClose={() => setAddOpen(false)}
       >

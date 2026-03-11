@@ -13,7 +13,6 @@ const EGG_MESSAGES = [
   "30 과학기술부가 만든 웹페이지 입니다!",
   "꽝!",
   ":D",
-  "신민기도 개발함!",
 ];
 
 export default function StudentSettings() {
