@@ -139,6 +139,19 @@ const formatMinutesAsHoursAndMinutes = (totalMinutes) => {
   return `${h}시간 ${m}분`;
 };
 
+/** ISO 날짜/시간 → "yyyy-mm-dd hh:mm" */
+function formatUpdatedAt(iso) {
+  if (!iso) return "-";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "-";
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mi = String(d.getMinutes()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
+}
+
 const compareNullableNum = (a, b) => {
   if (a == null && b == null) return 0;
   if (a == null) return 1;
@@ -193,6 +206,20 @@ async function fetchWeekEvents({ studentId, weekStartISO, weekEndISO }) {
 
   if (error) throw new Error(error.message);
   return data ?? [];
+}
+
+// ─── [추가] weekly_reflections 조회 ──────────────────────────────────────────
+
+async function fetchReflection({ uid, weekStartISO }) {
+  const { data, error } = await supabase
+    .from("weekly_reflections")
+    .select("id, content, updated_at")
+    .eq("owner_id", uid)
+    .eq("week_start", weekStartISO)
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+  return data ?? null;
 }
 
 // ─── Reducers ─────────────────────────────────────────────────────────────────
@@ -292,6 +319,53 @@ function useWeekEvents({ studentId, weekStartISO, weekEndISO, enabled }) {
   }, [studentId, weekStartISO, weekEndISO, enabled]);
 
   return state;
+}
+
+// ─── [추가] useReflection ─────────────────────────────────────────────────────
+
+const reflectionInitial = { status: STATUS.IDLE, data: null };
+
+function reflectionReducer(state, action) {
+  switch (action.type) {
+    case "LOADING":
+      return { status: STATUS.LOADING, data: null };
+    case "SUCCESS":
+      return { status: STATUS.IDLE, data: action.payload };
+    case "ERROR":
+      return { status: STATUS.ERROR, data: null };
+    case "RESET":
+      return reflectionInitial;
+    default:
+      return state;
+  }
+}
+
+function useReflection({ studentId, weekStartISO, enabled }) {
+  const [state, dispatch] = useReducer(reflectionReducer, reflectionInitial);
+
+  useEffect(() => {
+    if (!enabled || !isUuid(studentId)) {
+      dispatch({ type: "RESET" });
+      return;
+    }
+
+    let cancelled = false;
+    dispatch({ type: "LOADING" });
+
+    fetchReflection({ uid: studentId, weekStartISO })
+      .then((data) => {
+        if (!cancelled) dispatch({ type: "SUCCESS", payload: data });
+      })
+      .catch(() => {
+        if (!cancelled) dispatch({ type: "ERROR" });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [studentId, weekStartISO, enabled]);
+
+  return { reflection: state.data, status: state.status };
 }
 
 function useTeacherCalendarState({ studentId, students, order }) {
@@ -512,12 +586,10 @@ function StudentSearch({ students, currentStudentId, onSelect }) {
         const cls = String(s.class_no ?? "");
         let score = 0;
 
-        // 1. 이름 매칭
         if (q && name.includes(q)) {
           score += name === q ? 100 : 50;
         }
 
-        // 2. 반 매칭
         const pureDigit = q.replace(/[^0-9]/g, "");
         if (pureDigit && cls === pureDigit) {
           score += 70;
@@ -527,12 +599,7 @@ function StudentSearch({ students, currentStudentId, onSelect }) {
       })
       .filter((s) => s.score > 0)
       .sort((a, b) => {
-        // 1차: 점수 내림차순
-        if (b.score !== a.score) {
-          return b.score - a.score;
-        }
-
-        // 2차: 이름 가나다순
+        if (b.score !== a.score) return b.score - a.score;
         return a.name.localeCompare(b.name, "ko");
       })
       .slice(0, 8);
@@ -973,6 +1040,104 @@ function DayPanel({ dow, date, events, status }) {
   );
 }
 
+// ─── [추가] ReflectionPanel ───────────────────────────────────────────────────
+
+function ReflectionPanel({ reflection, status }) {
+  const isLoading = status === STATUS.LOADING;
+  const isError = status === STATUS.ERROR;
+
+  return (
+    <div className="u-panel" style={S.card}>
+      <div
+        style={{
+          ...S.row,
+          marginBottom: 12,
+          paddingBottom: 10,
+          borderBottom: "1px solid var(--border-subtle)",
+        }}
+      >
+        <span style={{ fontSize: 15, fontWeight: 800, lineHeight: 1.3 }}>
+          주간 성찰
+        </span>
+        {isLoading && (
+          <span
+            style={{
+              marginLeft: "auto",
+              fontSize: 11,
+              fontWeight: 700,
+              color: "var(--text-muted)",
+              ...FADE,
+            }}
+          >
+            업데이트 중…
+          </span>
+        )}
+        {isError && (
+          <span
+            style={{
+              marginLeft: "auto",
+              fontSize: 11,
+              fontWeight: 700,
+              color: "var(--accent-danger)",
+            }}
+          >
+            ⚠ 불러오기 실패
+          </span>
+        )}
+      </div>
+
+      <div style={dimWhen(isLoading)}>
+        {!reflection ? (
+          <div
+            style={{
+              minHeight: 60,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "var(--text-muted)",
+              fontSize: 13,
+              borderRadius: 10,
+              background: "var(--bg-2)",
+              border: "1px dashed var(--border-subtle)",
+            }}
+          >
+            {isError ? "성찰을 불러올 수 없습니다" : "작성된 성찰이 없습니다"}
+          </div>
+        ) : (
+          <>
+            <div
+              style={{
+                whiteSpace: "pre-wrap",
+                fontSize: 13,
+                color: "var(--text-2)",
+                lineHeight: 1.7,
+                padding: "10px 14px",
+                borderLeft: "3px solid var(--border-focus)",
+                background: "var(--bg-2)",
+                borderRadius: "0 8px 8px 0",
+                wordBreak: "break-word",
+              }}
+            >
+              {reflection.content}
+            </div>
+
+            <div
+              style={{
+                marginTop: 8,
+                fontSize: 12,
+                color: "var(--text-muted)",
+                textAlign: "right",
+              }}
+            >
+              마지막 저장: {formatUpdatedAt(reflection.updated_at)}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Loading / Error / Empty screens ─────────────────────────────────────────
 
 function LoadingScreen() {
@@ -1039,6 +1204,13 @@ function CalendarView({ studentId, students, order, setOrder }) {
     enabled: isUuid(studentId),
   });
 
+  // ── [추가] 성찰 조회 ──
+  const { reflection, status: reflectionStatus } = useReflection({
+    studentId,
+    weekStartISO: weekStart,
+    enabled: isUuid(studentId),
+  });
+
   const eventsByDate = useMemo(() => {
     const map = new Map(weekDays.map((d) => [toISODate(d), []]));
     for (const ev of events) {
@@ -1060,12 +1232,7 @@ function CalendarView({ studentId, students, order, setOrder }) {
             onSelect={goToStudentById}
           />
 
-          <div
-            style={{
-              paddingTop: 2,
-              paddingBottom: 2,
-            }}
-          >
+          <div style={{ paddingTop: 2, paddingBottom: 2 }}>
             <StudentHeader
               student={currentStudent}
               index={currentIndex}
@@ -1116,6 +1283,12 @@ function CalendarView({ studentId, students, order, setOrder }) {
         date={selectedDate}
         events={selectedEvents}
         status={eventsStatus}
+      />
+
+      {/* ── [추가] 주간 성찰 패널 ── */}
+      <ReflectionPanel
+        reflection={reflection}
+        status={reflectionStatus}
       />
     </div>
   );
