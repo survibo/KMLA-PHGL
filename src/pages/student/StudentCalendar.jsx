@@ -15,9 +15,30 @@ import {
 
 const CATEGORIES = ["기초 역량 강화", "진로 탐색"];
 const DOW = ["월", "화", "수", "목", "금", "토", "일"];
-const WEEK_LIMIT = { prev: 0, next: 21 }; // 이전 1주 / 이후 3주
 const TITLE_MAX = 50;
 const DESC_MAX = 200;
+
+/**
+ * 주 탐색 접근 정책 설정
+ *
+ * prevWeekAccess:
+ *   - allowedUntil: 저번 주에 접근 가능한 마감 시점
+ *     - dayOfWeek: 0=일 ~ 6=토 (JS 기본 요일)
+ *     - hour / minute: 해당 시각 (로컬 시간 기준)
+ *   - 예) 매주 월요일 08:30까지 저번 주 접근 허용
+ *     → { dayOfWeek: 1, hour: 8, minute: 30 }
+ *
+ * nextWeekLimit:
+ *   - maxWeeksAhead: 이번 주 기준 몇 주 앞까지 허용할지 (기본 2 → 이번 주 포함 총 3주)
+ */
+const WEEK_ACCESS_POLICY = {
+  prevWeekAccess: {
+    allowedUntil: { dayOfWeek: 1, hour: 8, minute: 30 },
+  },
+  nextWeekLimit: {
+    maxWeeksAhead: 2,
+  },
+};
 
 const DEFAULT_DRAFT = {
   category: CATEGORIES[0],
@@ -59,7 +80,7 @@ function getTodayDowIndex() {
 }
 
 /** ISO 날짜/시간 → "yyyy-mm-dd hh:mm" */
-function formatRequestedAt(iso) {
+function formatDateTimeKST(iso) {
   if (!iso) return "-";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "-";
@@ -71,6 +92,28 @@ function formatRequestedAt(iso) {
   const mi = String(d.getMinutes()).padStart(2, "0");
 
   return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
+}
+
+/**
+ * 저번 주 접근 가능 여부 판단
+ *
+ * 현재 시각이 policy.allowedUntil 이전이면 true를 반환한다.
+ * 예) allowedUntil = { dayOfWeek: 1, hour: 8, minute: 30 }
+ *   → 매주 월요일 08:30 이전에는 저번 주 접근 허용
+ *
+ * @param {{ dayOfWeek: number, hour: number, minute: number }} allowedUntil
+ * @param {Date} [now]
+ */
+function isPrevWeekAccessible(allowedUntil, now = new Date()) {
+  const { dayOfWeek, hour, minute } = allowedUntil;
+  const nowDay = now.getDay(); // 0=일 ~ 6=토
+
+  if (nowDay !== dayOfWeek) return nowDay < dayOfWeek;
+
+  // 같은 요일이면 시:분 비교
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  const limitMinutes = hour * 60 + minute;
+  return nowMinutes < limitMinutes;
 }
 
 // ─── Supabase API ─────────────────────────────────────────────────────────────
@@ -249,55 +292,15 @@ function EventCard({ event, onDelete }) {
               flexWrap: "wrap",
             }}
           >
-            <span
-              className="u-panel"
-              style={{
-                borderRadius: 999,
-                padding: "2px 8px",
-                fontSize: 12,
-                background: "var(--bg-1)",
-              }}
-            >
-              {event.category}
-            </span>
-            <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
-              {formatMinutesAsHM(event.duration_min)}
-            </span>
+            <CategoryBadge>{event.category}</CategoryBadge>
+            <DurationLabel minutes={event.duration_min} />
           </div>
-
           <div style={{ marginTop: 6, fontWeight: 900 }}>{event.title}</div>
-
           {event.description && (
-            <div
-              style={{
-                marginTop: 6,
-                color: "var(--text-muted)",
-                fontSize: 13,
-                whiteSpace: "pre-wrap",
-              }}
-            >
-              {event.description}
-            </div>
+            <EventDescription>{event.description}</EventDescription>
           )}
         </div>
-
-        <button
-          className="c-ctl c-btn c-btn--danger"
-          type="button"
-          onClick={() => onDelete(event.id)}
-          style={{
-            width: 60,
-            height: 32,
-            flex: "0 0 auto",
-            whiteSpace: "nowrap",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: 0,
-          }}
-        >
-          삭제
-        </button>
+        <DeleteButton onClick={() => onDelete(event.id)} />
       </div>
     </div>
   );
@@ -344,23 +347,9 @@ function TodoItem({ event, checked, onToggle, onDelete, disabled }) {
                 flexWrap: "wrap",
               }}
             >
-              <span
-                className="u-panel"
-                style={{
-                  borderRadius: 999,
-                  padding: "2px 8px",
-                  fontSize: 12,
-                  background: "var(--bg-1)",
-                  textDecoration: "none",
-                }}
-              >
-                {event.category}
-              </span>
-              <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                {formatMinutesAsHM(event.duration_min)}
-              </span>
+              <CategoryBadge>{event.category}</CategoryBadge>
+              <DurationLabel minutes={event.duration_min} />
             </div>
-
             <div
               style={{
                 marginTop: 6,
@@ -371,42 +360,81 @@ function TodoItem({ event, checked, onToggle, onDelete, disabled }) {
             >
               {event.title}
             </div>
-
             {event.description && (
-              <div
-                style={{
-                  marginTop: 6,
-                  color: "var(--text-muted)",
-                  fontSize: 13,
-                  whiteSpace: "pre-wrap",
-                  textDecoration: checked ? "line-through" : "none",
-                }}
-              >
+              <EventDescription strikethrough={checked}>
                 {event.description}
-              </div>
+              </EventDescription>
             )}
           </div>
         </label>
-
-        <button
-          className="c-ctl c-btn c-btn--danger"
-          type="button"
-          onClick={() => onDelete(event.id)}
-          style={{
-            width: 60,
-            height: 32,
-            flex: "0 0 auto",
-            whiteSpace: "nowrap",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: 0,
-          }}
-        >
-          삭제
-        </button>
+        <DeleteButton onClick={() => onDelete(event.id)} />
       </div>
     </div>
+  );
+}
+
+// ─── Shared atomic sub-components (중복 제거) ────────────────────────────────
+
+function CategoryBadge({ children }) {
+  return (
+    <span
+      className="u-panel"
+      style={{
+        borderRadius: 999,
+        padding: "2px 8px",
+        fontSize: 12,
+        background: "var(--bg-1)",
+        textDecoration: "none",
+      }}
+    >
+      {children}
+    </span>
+  );
+}
+
+function DurationLabel({ minutes }) {
+  return (
+    <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+      {formatMinutesAsHM(minutes)}
+    </span>
+  );
+}
+
+function EventDescription({ children, strikethrough = false }) {
+  return (
+    <div
+      style={{
+        marginTop: 6,
+        color: "var(--text-muted)",
+        fontSize: 13,
+        whiteSpace: "pre-wrap",
+        textDecoration: strikethrough ? "line-through" : "none",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function DeleteButton({ onClick }) {
+  return (
+    <button
+      className="c-ctl c-btn c-btn--danger"
+      type="button"
+      onClick={onClick}
+      style={{
+        width: 60,
+        height: 32,
+        flex: "0 0 auto",
+        whiteSpace: "nowrap",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 0,
+      }}
+    >
+      삭제
+    </button>
   );
 }
 
@@ -501,17 +529,34 @@ export default function StudentCalendar() {
   const isOnline = useNetworkStatus();
   const { viewMode } = useCalendarView();
 
-  // ── 주 탐색 상태 ──
+  // ── 주 탐색 경계 계산 ──
   const thisMonday = useMemo(() => startOfWeekMonday(new Date()), []);
-  const minMonday = useMemo(
-    () => addDays(thisMonday, WEEK_LIMIT.prev),
-    [thisMonday]
+
+  /**
+   * 저번 주 접근 가능 여부를 실시간으로 판단
+   * policy 기준: 매주 월요일 08:30 이전이면 저번 주 허용
+   */
+  const canAccessPrevWeek = useMemo(
+    () => isPrevWeekAccessible(WEEK_ACCESS_POLICY.prevWeekAccess.allowedUntil),
+
+    [] // 컴포넌트 마운트 시 한 번 계산 (주 이동 중 변하지 않음)
   );
+
+  const minMonday = useMemo(
+    () =>
+      canAccessPrevWeek
+        ? addDays(thisMonday, -7) // 저번 주 허용
+        : thisMonday, // 이번 주가 최솟값
+    [thisMonday, canAccessPrevWeek]
+  );
+
   const maxMonday = useMemo(
-    () => addDays(thisMonday, WEEK_LIMIT.next),
+    () =>
+      addDays(thisMonday, WEEK_ACCESS_POLICY.nextWeekLimit.maxWeeksAhead * 7),
     [thisMonday]
   );
 
+  // ── 주 탐색 상태 ──
   const [weekBase, setWeekBase] = useState(() => startOfWeekMonday(new Date()));
   const [selectedIdx, setSelectedIdx] = useState(getTodayDowIndex);
 
@@ -564,50 +609,60 @@ export default function StudentCalendar() {
     () => eventsByDate.get(selectedISO) ?? [],
     [eventsByDate, selectedISO]
   );
-  const [togglingMap, setTogglingMap] = useState({});
-
-  // ── 주 이동 ──
-  const navigateWeek = (offset) => {
-    setSelectedIdx(0);
-    setWeekBase(addDays(monday, offset));
-  };
-
-  const goToThisWeek = () => {
-    setSelectedIdx(getTodayDowIndex());
-    setWeekBase(startOfWeekMonday(new Date()));
-  };
-
-  const toggleChecked = async (eventId, nextChecked) => {
-    if (togglingMap[eventId]) return;
-
-    setTogglingMap((prev) => ({ ...prev, [eventId]: true }));
-    setEvents((prev) =>
-      prev.map((ev) =>
-        ev.id === eventId ? { ...ev, is_done: nextChecked } : ev
-      )
-    );
-
-    try {
-      await updateEventDoneById({ id: eventId, isDone: nextChecked });
-    } catch (err) {
-      setEvents((prev) =>
-        prev.map((ev) =>
-          ev.id === eventId ? { ...ev, is_done: !nextChecked } : ev
-        )
-      );
-      window.alert(err.message);
-    } finally {
-      setTogglingMap((prev) => {
-        const next = { ...prev };
-        delete next[eventId];
-        return next;
-      });
-    }
-  };
 
   const selectedDoneCount = useMemo(
     () => selectedList.filter((ev) => Boolean(ev.is_done)).length,
     [selectedList]
+  );
+
+  const [togglingMap, setTogglingMap] = useState({});
+
+  // ── 주 이동 ──
+  const navigateWeek = useCallback(
+    (offsetDays) => {
+      setSelectedIdx(0);
+      setWeekBase(addDays(monday, offsetDays));
+    },
+    [monday]
+  );
+
+  const goToThisWeek = useCallback(() => {
+    setSelectedIdx(getTodayDowIndex());
+    setWeekBase(startOfWeekMonday(new Date()));
+  }, []);
+
+  // ── 완료 토글 ──
+  const toggleChecked = useCallback(
+    async (eventId, nextChecked) => {
+      if (togglingMap[eventId]) return;
+
+      setTogglingMap((prev) => ({ ...prev, [eventId]: true }));
+      // Optimistic update
+      setEvents((prev) =>
+        prev.map((ev) =>
+          ev.id === eventId ? { ...ev, is_done: nextChecked } : ev
+        )
+      );
+
+      try {
+        await updateEventDoneById({ id: eventId, isDone: nextChecked });
+      } catch (err) {
+        // Rollback on failure
+        setEvents((prev) =>
+          prev.map((ev) =>
+            ev.id === eventId ? { ...ev, is_done: !nextChecked } : ev
+          )
+        );
+        window.alert(err.message);
+      } finally {
+        setTogglingMap((prev) => {
+          const next = { ...prev };
+          delete next[eventId];
+          return next;
+        });
+      }
+    },
+    [togglingMap, setEvents]
   );
 
   // ── 이벤트 추가 모달 상태 ──
@@ -616,39 +671,41 @@ export default function StudentCalendar() {
   const [formError, setFormError] = useState("");
   const [draft, setDraft] = useState(DEFAULT_DRAFT);
 
-  const updateDraft = (field, value) => {
+  const updateDraft = useCallback((field, value) => {
     const v = value ?? "";
-
     const limited =
       field === "title"
         ? v.slice(0, TITLE_MAX)
         : field === "description"
         ? v.slice(0, DESC_MAX)
         : v;
-
     setDraft((prev) => ({ ...prev, [field]: limited }));
-  };
+  }, []);
 
-  const openAddModal = () => {
+  const openAddModal = useCallback(() => {
     setFormError("");
     setDraft({ ...DEFAULT_DRAFT });
     setAddOpen(true);
-  };
+  }, []);
+
+  const closeAddModal = useCallback(() => setAddOpen(false), []);
 
   // ── 이벤트 추가 ──
-  const handleAddEvent = async () => {
+  const handleAddEvent = useCallback(async () => {
     if (!uid) return;
 
-    if (!draft.title.trim()) {
+    const trimmedTitle = draft.title.trim();
+    const trimmedDesc = draft.description.trim();
+
+    if (!trimmedTitle) {
       setFormError("내용은 비워둘 수 없음");
       return;
     }
-
-    if (draft.title.trim().length > TITLE_MAX) {
+    if (trimmedTitle.length > TITLE_MAX) {
       setFormError(`내용은 ${TITLE_MAX}자 이하여야 함`);
       return;
     }
-    if (draft.description.trim().length > DESC_MAX) {
+    if (trimmedDesc.length > DESC_MAX) {
       setFormError(`설명은 ${DESC_MAX}자 이하여야 함`);
       return;
     }
@@ -671,8 +728,8 @@ export default function StudentCalendar() {
         owner_id: uid,
         date: selectedISO,
         category: draft.category,
-        title: draft.title.trim(),
-        description: draft.description.trim() || null,
+        title: trimmedTitle,
+        description: trimmedDesc || null,
         duration_min: minutes,
         is_done: false,
       });
@@ -683,19 +740,21 @@ export default function StudentCalendar() {
     } finally {
       setSaving(false);
     }
-  };
+  }, [uid, draft, selectedISO, reload]);
 
   // ── 이벤트 삭제 ──
-  const handleDeleteEvent = async (id) => {
-    if (!window.confirm("이 항목을 삭제하겠습니까?")) return;
-
-    try {
-      await deleteEventById(id);
-      await reload();
-    } catch (err) {
-      window.alert(err.message);
-    }
-  };
+  const handleDeleteEvent = useCallback(
+    async (id) => {
+      if (!window.confirm("이 항목을 삭제하겠습니까?")) return;
+      try {
+        await deleteEventById(id);
+        await reload();
+      } catch (err) {
+        window.alert(err.message);
+      }
+    },
+    [reload]
+  );
 
   // ── 주간 성찰 ──
   const [reflection, setReflection] = useState(null);
@@ -719,7 +778,7 @@ export default function StudentCalendar() {
       .catch((err) => setRefError(err.message));
   }, [uid, weekStartISO]);
 
-  const handleSaveReflection = async () => {
+  const handleSaveReflection = useCallback(async () => {
     if (!refDraft.trim()) return;
     setRefSaving(true);
     setRefError("");
@@ -727,13 +786,18 @@ export default function StudentCalendar() {
       await upsertReflection({ uid, weekStartISO, content: refDraft.trim() });
       const updated = await fetchReflection({ uid, weekStartISO });
       setReflection(updated);
-      setRefEditing(false); // 저장 후 읽기 모드로
+      setRefEditing(false);
     } catch (err) {
       setRefError(err.message);
     } finally {
       setRefSaving(false);
     }
-  };
+  }, [uid, weekStartISO, refDraft]);
+
+  const handleCancelReflection = useCallback(() => {
+    setRefDraft(reflection?.content ?? "");
+    setRefEditing(false);
+  }, [reflection]);
 
   // ── 렌더 ──
   if (loading) {
@@ -965,7 +1029,6 @@ export default function StudentCalendar() {
           </div>
         )}
 
-        {/* 읽기 모드 */}
         {reflection && !refEditing ? (
           <div
             style={{
@@ -980,7 +1043,6 @@ export default function StudentCalendar() {
             {reflection.content}
           </div>
         ) : (
-          /* 편집 모드 */
           <textarea
             className="c-ctl c-textarea"
             rows={5}
@@ -1001,7 +1063,7 @@ export default function StudentCalendar() {
         >
           <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
             {reflection?.updated_at
-              ? `마지막 저장: ${formatRequestedAt(reflection.updated_at)}`
+              ? `마지막 저장: ${formatDateTimeKST(reflection.updated_at)}`
               : "아직 작성되지 않았습니다."}
           </div>
 
@@ -1011,10 +1073,7 @@ export default function StudentCalendar() {
                 <button
                   className="c-ctl c-btn"
                   type="button"
-                  onClick={() => {
-                    setRefDraft(reflection?.content ?? "");
-                    setRefEditing(false);
-                  }}
+                  onClick={handleCancelReflection}
                   disabled={refSaving}
                 >
                   취소
@@ -1043,13 +1102,13 @@ export default function StudentCalendar() {
         title={`${DOW[selectedIdx]}요일 (${formatKoreanMD(
           selectedDate
         )}) 일정 추가`}
-        onClose={() => setAddOpen(false)}
+        onClose={closeAddModal}
       >
         <AddEventForm
           draft={draft}
           onChange={updateDraft}
           onSubmit={handleAddEvent}
-          onCancel={() => setAddOpen(false)}
+          onCancel={closeAddModal}
           saving={saving}
           error={formError}
         />
