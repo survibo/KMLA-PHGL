@@ -47,6 +47,18 @@ const DEFAULT_DRAFT = {
   minutes: "",
 };
 
+const createCategoryTotals = (events) => {
+  const totals = Object.fromEntries(CATEGORIES.map((category) => [category, 0]));
+
+  for (const event of events) {
+    if (event.category in totals) {
+      totals[event.category] += event.duration_min || 0;
+    }
+  }
+
+  return totals;
+};
+
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
 
 /** 분 → "n시간 m분" 형식 (개별 항목용) */
@@ -118,13 +130,13 @@ function isPrevWeekAccessible(allowedUntil, now = new Date()) {
 
 // ─── Supabase API ─────────────────────────────────────────────────────────────
 
-async function fetchWeekEvents({ uid, weekStartISO, weekEndISO }) {
+async function fetchWeekEvents({ userId, weekStartISO, weekEndISO }) {
   const { data, error } = await supabase
     .from("events")
     .select(
       "id, owner_id, title, description, category, date, duration_min, is_done, created_at"
     )
-    .eq("owner_id", uid)
+    .eq("owner_id", userId)
     .gte("date", weekStartISO)
     .lte("date", weekEndISO)
     .order("date", { ascending: true })
@@ -152,11 +164,11 @@ async function updateEventDoneById({ id, isDone }) {
   if (error) throw new Error(error.message);
 }
 
-async function fetchReflection({ uid, weekStartISO }) {
+async function fetchReflection({ userId, weekStartISO }) {
   const { data, error } = await supabase
     .from("weekly_reflections")
     .select("id, content, updated_at")
-    .eq("owner_id", uid)
+    .eq("owner_id", userId)
     .eq("week_start", weekStartISO)
     .maybeSingle();
 
@@ -164,11 +176,11 @@ async function fetchReflection({ uid, weekStartISO }) {
   return data ?? null;
 }
 
-async function upsertReflection({ uid, weekStartISO, content }) {
+async function upsertReflection({ userId, weekStartISO, content }) {
   const { error } = await supabase
     .from("weekly_reflections")
     .upsert(
-      { owner_id: uid, week_start: weekStartISO, content },
+      { owner_id: userId, week_start: weekStartISO, content },
       { onConflict: "owner_id,week_start" }
     );
   if (error) throw new Error(error.message);
@@ -176,17 +188,17 @@ async function upsertReflection({ uid, weekStartISO, content }) {
 
 // ─── Local custom hook ────────────────────────────────────────────────────────
 
-function useWeekEvents({ uid, weekStartISO, weekEndISO }) {
+function useWeekEvents({ userId, weekStartISO, weekEndISO }) {
   const [events, setEvents] = useState([]);
   const [fetching, setFetching] = useState(true);
   const [error, setError] = useState("");
 
-  const load = useCallback(async () => {
-    if (!uid) return;
+  const reloadWeekEvents = useCallback(async () => {
+    if (!userId) return;
     setFetching(true);
     setError("");
     try {
-      const data = await fetchWeekEvents({ uid, weekStartISO, weekEndISO });
+      const data = await fetchWeekEvents({ userId, weekStartISO, weekEndISO });
       setEvents(data);
     } catch (err) {
       setError(err.message);
@@ -194,13 +206,13 @@ function useWeekEvents({ uid, weekStartISO, weekEndISO }) {
     } finally {
       setFetching(false);
     }
-  }, [uid, weekStartISO, weekEndISO]);
+  }, [userId, weekStartISO, weekEndISO]);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    reloadWeekEvents();
+  }, [reloadWeekEvents]);
 
-  return { events, setEvents, fetching, error, reload: load };
+  return { events, setEvents, fetching, error, reload: reloadWeekEvents };
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -525,7 +537,7 @@ function AddEventForm({ draft, onChange, onSubmit, onCancel, saving, error }) {
 
 export default function StudentCalendar() {
   const { session, loading } = useMyProfile();
-  const uid = session?.user?.id;
+  const userId = session?.user?.id;
   const isOnline = useNetworkStatus();
   const { viewMode } = useCalendarView();
 
@@ -557,10 +569,15 @@ export default function StudentCalendar() {
   );
 
   // ── 주 탐색 상태 ──
-  const [weekBase, setWeekBase] = useState(() => startOfWeekMonday(new Date()));
-  const [selectedIdx, setSelectedIdx] = useState(getTodayDowIndex);
+  const [weekAnchorDate, setWeekAnchorDate] = useState(() =>
+    startOfWeekMonday(new Date())
+  );
+  const [selectedDayIndex, setSelectedDayIndex] = useState(getTodayDowIndex);
 
-  const monday = useMemo(() => startOfWeekMonday(weekBase), [weekBase]);
+  const monday = useMemo(
+    () => startOfWeekMonday(weekAnchorDate),
+    [weekAnchorDate]
+  );
   const weekDays = useMemo(
     () => Array.from({ length: 7 }, (_, i) => addDays(monday, i)),
     [monday]
@@ -570,7 +587,7 @@ export default function StudentCalendar() {
   const canNext = monday.getTime() < maxMonday.getTime();
   const isThisWeek = toISODate(monday) === toISODate(thisMonday);
 
-  const selectedDate = weekDays[selectedIdx];
+  const selectedDate = weekDays[selectedDayIndex];
   const selectedISO = toISODate(selectedDate);
   const weekStartISO = toISODate(monday);
   const weekEndISO = toISODate(addDays(monday, 6));
@@ -582,7 +599,11 @@ export default function StudentCalendar() {
     fetching,
     error: fetchError,
     reload,
-  } = useWeekEvents({ uid: loading ? null : uid, weekStartISO, weekEndISO });
+  } = useWeekEvents({
+    userId: loading ? null : userId,
+    weekStartISO,
+    weekEndISO,
+  });
 
   const eventsByDate = useMemo(() => {
     const map = new Map(weekDays.map((d) => [toISODate(d), []]));
@@ -592,18 +613,7 @@ export default function StudentCalendar() {
     return map;
   }, [events, weekDays]);
 
-  const totals = useMemo(
-    () =>
-      Object.fromEntries(
-        CATEGORIES.map((cat) => [
-          cat,
-          events
-            .filter((ev) => ev.category === cat)
-            .reduce((sum, ev) => sum + (ev.duration_min || 0), 0),
-        ])
-      ),
-    [events]
-  );
+  const totals = useMemo(() => createCategoryTotals(events), [events]);
 
   const selectedList = useMemo(
     () => eventsByDate.get(selectedISO) ?? [],
@@ -620,15 +630,15 @@ export default function StudentCalendar() {
   // ── 주 이동 ──
   const navigateWeek = useCallback(
     (offsetDays) => {
-      setSelectedIdx(0);
-      setWeekBase(addDays(monday, offsetDays));
+      setSelectedDayIndex(0);
+      setWeekAnchorDate(addDays(monday, offsetDays));
     },
     [monday]
   );
 
   const goToThisWeek = useCallback(() => {
-    setSelectedIdx(getTodayDowIndex());
-    setWeekBase(startOfWeekMonday(new Date()));
+    setSelectedDayIndex(getTodayDowIndex());
+    setWeekAnchorDate(startOfWeekMonday(new Date()));
   }, []);
 
   // ── 완료 토글 ──
@@ -692,7 +702,7 @@ export default function StudentCalendar() {
 
   // ── 이벤트 추가 ──
   const handleAddEvent = useCallback(async () => {
-    if (!uid) return;
+    if (!userId) return;
 
     const trimmedTitle = draft.title.trim();
     const trimmedDesc = draft.description.trim();
@@ -725,7 +735,7 @@ export default function StudentCalendar() {
 
     try {
       await insertEvent({
-        owner_id: uid,
+        owner_id: userId,
         date: selectedISO,
         category: draft.category,
         title: trimmedTitle,
@@ -740,7 +750,7 @@ export default function StudentCalendar() {
     } finally {
       setSaving(false);
     }
-  }, [uid, draft, selectedISO, reload]);
+  }, [userId, draft, selectedISO, reload]);
 
   // ── 이벤트 삭제 ──
   const handleDeleteEvent = useCallback(
@@ -758,45 +768,49 @@ export default function StudentCalendar() {
 
   // ── 주간 성찰 ──
   const [reflection, setReflection] = useState(null);
-  const [refDraft, setRefDraft] = useState("");
-  const [refSaving, setRefSaving] = useState(false);
-  const [refError, setRefError] = useState("");
-  const [refEditing, setRefEditing] = useState(false);
+  const [reflectionDraft, setReflectionDraft] = useState("");
+  const [isSavingReflection, setIsSavingReflection] = useState(false);
+  const [reflectionError, setReflectionError] = useState("");
+  const [isEditingReflection, setIsEditingReflection] = useState(false);
 
   useEffect(() => {
-    if (!uid) return;
+    if (!userId) return;
     setReflection(null);
-    setRefDraft("");
-    setRefEditing(false);
-    setRefError("");
+    setReflectionDraft("");
+    setIsEditingReflection(false);
+    setReflectionError("");
 
-    fetchReflection({ uid, weekStartISO })
+    fetchReflection({ userId, weekStartISO })
       .then((data) => {
         setReflection(data);
-        setRefDraft(data?.content ?? "");
+        setReflectionDraft(data?.content ?? "");
       })
-      .catch((err) => setRefError(err.message));
-  }, [uid, weekStartISO]);
+      .catch((err) => setReflectionError(err.message));
+  }, [userId, weekStartISO]);
 
   const handleSaveReflection = useCallback(async () => {
-    if (!refDraft.trim()) return;
-    setRefSaving(true);
-    setRefError("");
+    if (!reflectionDraft.trim()) return;
+    setIsSavingReflection(true);
+    setReflectionError("");
     try {
-      await upsertReflection({ uid, weekStartISO, content: refDraft.trim() });
-      const updated = await fetchReflection({ uid, weekStartISO });
+      await upsertReflection({
+        userId,
+        weekStartISO,
+        content: reflectionDraft.trim(),
+      });
+      const updated = await fetchReflection({ userId, weekStartISO });
       setReflection(updated);
-      setRefEditing(false);
+      setIsEditingReflection(false);
     } catch (err) {
-      setRefError(err.message);
+      setReflectionError(err.message);
     } finally {
-      setRefSaving(false);
+      setIsSavingReflection(false);
     }
-  }, [uid, weekStartISO, refDraft]);
+  }, [userId, weekStartISO, reflectionDraft]);
 
   const handleCancelReflection = useCallback(() => {
-    setRefDraft(reflection?.content ?? "");
-    setRefEditing(false);
+    setReflectionDraft(reflection?.content ?? "");
+    setIsEditingReflection(false);
   }, [reflection]);
 
   // ── 렌더 ──
@@ -900,7 +914,7 @@ export default function StudentCalendar() {
         {weekDays.map((day, idx) => {
           const iso = toISODate(day);
           const count = (eventsByDate.get(iso) ?? []).length;
-          const active = idx === selectedIdx;
+          const active = idx === selectedDayIndex;
 
           return (
             <button
@@ -908,7 +922,7 @@ export default function StudentCalendar() {
               type="button"
               role="tab"
               aria-selected={active}
-              onClick={() => setSelectedIdx(idx)}
+              onClick={() => setSelectedDayIndex(idx)}
               className="c-ctl c-btn"
               style={{
                 minWidth: 92,
@@ -957,7 +971,7 @@ export default function StudentCalendar() {
           }}
         >
           <div style={{ fontWeight: 900 }}>
-            {DOW[selectedIdx]}요일 · {formatKoreanMD(selectedDate)}
+            {DOW[selectedDayIndex]}요일 · {formatKoreanMD(selectedDate)}
             {viewMode === "todo"
               ? ` · 완료 ${selectedDoneCount}/${selectedList.length}`
               : ""}
@@ -1012,24 +1026,24 @@ export default function StudentCalendar() {
           }}
         >
           <div style={{ fontWeight: 900 }}>주간 성찰</div>
-          {reflection && !refEditing && (
+          {reflection && !isEditingReflection && (
             <button
               className="c-ctl c-btn"
               type="button"
-              onClick={() => setRefEditing(true)}
+              onClick={() => setIsEditingReflection(true)}
             >
               수정
             </button>
           )}
         </div>
 
-        {refError && (
+        {reflectionError && (
           <div className="u-alert u-alert--error" style={{ marginBottom: 10 }}>
-            {refError}
+            {reflectionError}
           </div>
         )}
 
-        {reflection && !refEditing ? (
+        {reflection && !isEditingReflection ? (
           <div
             style={{
               whiteSpace: "pre-wrap",
@@ -1046,10 +1060,10 @@ export default function StudentCalendar() {
           <textarea
             className="c-ctl c-textarea"
             rows={5}
-            value={refDraft}
-            onChange={(e) => setRefDraft(e.target.value)}
+            value={reflectionDraft}
+            onChange={(e) => setReflectionDraft(e.target.value)}
             placeholder="이번 주를 돌아보며 느낀 점을 작성해주세요."
-            autoFocus={refEditing}
+            autoFocus={isEditingReflection}
           />
         )}
 
@@ -1067,14 +1081,14 @@ export default function StudentCalendar() {
               : "아직 작성되지 않았습니다."}
           </div>
 
-          {(!reflection || refEditing) && (
+          {(!reflection || isEditingReflection) && (
             <div style={{ display: "flex", gap: 8 }}>
-              {refEditing && (
+              {isEditingReflection && (
                 <button
                   className="c-ctl c-btn"
                   type="button"
                   onClick={handleCancelReflection}
-                  disabled={refSaving}
+                  disabled={isSavingReflection}
                 >
                   취소
                 </button>
@@ -1084,12 +1098,12 @@ export default function StudentCalendar() {
                 type="button"
                 onClick={handleSaveReflection}
                 disabled={
-                  refSaving ||
-                  !refDraft.trim() ||
-                  refDraft.trim() === reflection?.content
+                  isSavingReflection ||
+                  !reflectionDraft.trim() ||
+                  reflectionDraft.trim() === reflection?.content
                 }
               >
-                {refSaving ? "저장 중..." : "저장"}
+                {isSavingReflection ? "저장 중..." : "저장"}
               </button>
             </div>
           )}
@@ -1099,7 +1113,7 @@ export default function StudentCalendar() {
       {/* ── 추가 모달 ── */}
       <Modal
         open={addOpen}
-        title={`${DOW[selectedIdx]}요일 (${formatKoreanMD(
+        title={`${DOW[selectedDayIndex]}요일 (${formatKoreanMD(
           selectedDate
         )}) 일정 추가`}
         onClose={closeAddModal}

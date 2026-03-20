@@ -19,156 +19,64 @@ import Pending from "./pages/Pending";
 import StudentLayout from "./components/StudentLayout";
 import TeacherLayout from "./components/TeacherLayout";
 
+function StudentPage({ children }) {
+  return (
+    <ProtectedRoute allowRole="student">
+      <StudentLayout>{children}</StudentLayout>
+    </ProtectedRoute>
+  );
+}
+
+function TeacherPage({ children }) {
+  return (
+    <ProtectedRoute allowRole="teacher">
+      <TeacherLayout>{children}</TeacherLayout>
+    </ProtectedRoute>
+  );
+}
+
+const studentRoutes = [
+  { path: "/student/calendar", element: <StudentCalendar /> },
+  { path: "/student/absence", element: <StudentAbsence /> },
+  { path: "/student/settings", element: <StudentSettings /> },
+  { path: "/student/profile", element: <MyProfile /> },
+  { path: "/student/profile/edit", element: <MyProfileEdit /> },
+];
+
+const teacherRoutes = [
+  { path: "/teacher", element: <TeacherStudents /> },
+  { path: "/teacher/profile", element: <MyProfile /> },
+  { path: "/teacher/profile/edit", element: <MyProfileEdit /> },
+  { path: "/teacher/students", element: <TeacherStudents /> },
+  { path: "/teacher/teachers", element: <TeacherTeachers /> },
+  { path: "/teacher/calendar/:studentId", element: <TeacherCalendar /> },
+  { path: "/teacher/absences", element: <TeacherAbsences /> },
+  { path: "/teacher/weeklyaudit", element: <TeacherWeeklyAudit /> },
+];
+
 export default function App() {
   return (
     <Routes>
       <Route path="/" element={<Navigate to="/login" replace />} />
-
-      {/* 공개 */}
       <Route path="/login" element={<Login />} />
       <Route path="/auth/callback" element={<AuthCallback />} />
       <Route path="/pending" element={<Pending />} />
 
-      {/* 학생 */}
-      <Route
-        path="/student/calendar"
-        element={
-          <ProtectedRoute allowRole="student">
-            <StudentLayout>
-              <StudentCalendar />
-            </StudentLayout>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/student/absence"
-        element={
-          <ProtectedRoute allowRole="student">
-            <StudentLayout>
-              <StudentAbsence />
-            </StudentLayout>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/student/settings"
-        element={
-          <ProtectedRoute allowRole="student">
-            <StudentLayout>
-              <StudentSettings />
-            </StudentLayout>
-          </ProtectedRoute>
-        }
-      />
+      {studentRoutes.map(({ path, element }) => (
+        <Route
+          key={path}
+          path={path}
+          element={<StudentPage>{element}</StudentPage>}
+        />
+      ))}
 
-      <Route 
-        path="/student/profile"
-        element={
-          <ProtectedRoute allowRole="student">
-            <StudentLayout>
-              <MyProfile />
-            </StudentLayout>
-          </ProtectedRoute>
-        }
-      />
-
-      {/* 나중에 닫는거 고려 */}
-      <Route
-        path="/student/profile/edit"
-        element={
-          <ProtectedRoute allowRole="student">
-            <StudentLayout>
-              <MyProfileEdit />
-            </StudentLayout>
-          </ProtectedRoute>
-        }
-      />
-
-      {/* 교사 */}
-      <Route
-        path="/teacher"
-        element={
-          <ProtectedRoute allowRole="teacher">
-            <TeacherLayout>
-              <TeacherStudents />
-            </TeacherLayout>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/teacher/profile"
-        element={
-          <ProtectedRoute allowRole="teacher">
-            <TeacherLayout>
-              <MyProfile />
-            </TeacherLayout>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/teacher/profile/edit"
-        element={
-          <ProtectedRoute allowRole="teacher">
-            <TeacherLayout>
-              <MyProfileEdit />
-            </TeacherLayout>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/teacher/students"
-        element={
-          <ProtectedRoute allowRole="teacher">
-            <TeacherLayout>
-              <TeacherStudents />
-            </TeacherLayout>
-          </ProtectedRoute>
-        }
-      />
-
-      <Route
-        path="/teacher/teachers"
-        element={
-          <ProtectedRoute allowRole="teacher">
-            <TeacherLayout>
-              <TeacherTeachers />
-            </TeacherLayout>
-          </ProtectedRoute>
-        }
-      />
-
-      <Route
-        path="/teacher/calendar/:studentId"
-        element={
-          <ProtectedRoute allowRole="teacher">
-            <TeacherLayout>
-              <TeacherCalendar />
-            </TeacherLayout>
-          </ProtectedRoute>
-        }
-      />
-
-       <Route
-        path="/teacher/absences"
-        element={
-          <ProtectedRoute allowRole="teacher">
-            <TeacherLayout>
-              <TeacherAbsences />
-            </TeacherLayout>
-          </ProtectedRoute>
-        }
-      />
-
-      <Route
-        path="/teacher/weeklyaudit"
-        element={
-          <ProtectedRoute allowRole="teacher">
-            <TeacherLayout>
-              <TeacherWeeklyAudit />
-            </TeacherLayout>
-          </ProtectedRoute>
-        }
-      />
+      {teacherRoutes.map(({ path, element }) => (
+        <Route
+          key={path}
+          path={path}
+          element={<TeacherPage>{element}</TeacherPage>}
+        />
+      ))}
 
       <Route path="*" element={<NotFound />} />
     </Routes>
