@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
+import { isAbortError } from "../../lib/isAbortError";
 
 const SORTS = {
   CREATED: "created_at",
@@ -47,17 +48,34 @@ export default function TeacherTeachers() {
   // ✅ 버튼 로딩 상태(권한 박탈 중)
   const [updatingId, setUpdatingId] = useState(null);
 
-  async function load() {
+  const load = useCallback(async (signal) => {
     setLoading(true);
     setError("");
 
     // 1) profiles 기본 조회
-    const { data, error } = await supabase
+    const q = search.trim();
+    let query = supabase
       .from("profiles")
       .select(
         "id, name, role, approved, created_at, role_updated_by, role_updated_at"
-      )
-      .order("created_at", { ascending: false });
+      );
+
+    if (includeRevoked) {
+      query = query.or("role.eq.teacher,role_updated_at.not.is.null");
+    } else {
+      query = query.eq("role", "teacher");
+    }
+
+    if (approved === "approved") query = query.eq("approved", true);
+    if (approved === "pending") query = query.eq("approved", false);
+    if (q) query = query.ilike("name", `%${q}%`);
+
+    query = query.order(sortKey, { ascending: asc, nullsFirst: false });
+    if (signal) query = query.abortSignal(signal);
+
+    const { data, error } = await query;
+
+    if (signal?.aborted || isAbortError(error)) return;
 
     if (error) {
       setError(error.message);
@@ -72,12 +90,20 @@ export default function TeacherTeachers() {
     const actorIds = list.map((p) => p.role_updated_by).filter(Boolean);
     const ids = Array.from(new Set(actorIds));
 
+    if (signal?.aborted) return;
+
     let map = new Map();
     if (ids.length > 0) {
-      const { data: profiles, error: pErr } = await supabase
+      let actorQuery = supabase
         .from("profiles")
         .select("id, name")
         .in("id", ids);
+
+      if (signal) actorQuery = actorQuery.abortSignal(signal);
+
+      const { data: profiles, error: pErr } = await actorQuery;
+
+      if (signal?.aborted || isAbortError(pErr)) return;
 
       if (pErr) {
         setError(pErr.message);
@@ -89,19 +115,31 @@ export default function TeacherTeachers() {
       map = new Map((profiles ?? []).map((p) => [p.id, p]));
     }
 
-    setRows(
-      list.map((p) => ({
-        ...p,
-        actor: p.role_updated_by ? map.get(p.role_updated_by) ?? null : null,
-      }))
-    );
+    if (!signal?.aborted) {
+      setRows(
+        list.map((p) => ({
+          ...p,
+          actor: p.role_updated_by ? map.get(p.role_updated_by) ?? null : null,
+        }))
+      );
 
-    setLoading(false);
-  }
+      setLoading(false);
+    }
+  }, [includeRevoked, approved, search, sortKey, asc]);
 
   useEffect(() => {
-    load();
-  }, []);
+    const controller = new AbortController();
+
+    load(controller.signal).catch((err) => {
+      if (!isAbortError(err)) {
+        setError(err?.message ?? String(err));
+        setRows([]);
+        setLoading(false);
+      }
+    });
+
+    return () => controller.abort();
+  }, [load]);
 
   // ✅ 권한 박탈 버튼: role을 student로 변경
   async function revokeTeacher(userId, userName) {
@@ -113,14 +151,34 @@ export default function TeacherTeachers() {
     try {
       setUpdatingId(userId);
 
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from("profiles")
         .update({ role: "student" })
-        .eq("id", userId);
+        .eq("id", userId)
+        .select(
+          "id, name, role, approved, created_at, role_updated_by, role_updated_at"
+        )
+        .single();
 
       if (error) throw error;
 
-      await load();
+      let actor = null;
+      if (data?.role_updated_by) {
+        const { data: actorProfile, error: actorError } = await supabase
+          .from("profiles")
+          .select("id, name")
+          .eq("id", data.role_updated_by)
+          .maybeSingle();
+
+        if (actorError) throw actorError;
+        actor = actorProfile ?? null;
+      }
+
+      setRows((prev) =>
+        prev.map((row) =>
+          row.id === userId ? { ...data, actor } : row,
+        ),
+      );
     } catch (err) {
       window.alert(`권한 박탈 실패: ${err?.message ?? String(err)}`);
     } finally {
@@ -143,17 +201,7 @@ export default function TeacherTeachers() {
   }, [teacherCandidates]);
 
   const filtered = useMemo(() => {
-    let list = teacherCandidates;
-
-    if (approved === "approved") list = list.filter((p) => p.approved === true);
-    if (approved === "pending") list = list.filter((p) => p.approved === false);
-
-    if (search.trim()) {
-      const q = search.trim().toLowerCase();
-      list = list.filter((p) => (p.name ?? "").toLowerCase().includes(q));
-    }
-
-    list = [...list].sort((a, b) => {
+    const list = [...teacherCandidates].sort((a, b) => {
       if (sortKey === SORTS.APPROVED) {
         const va = Number(!!a.approved);
         const vb = Number(!!b.approved);
@@ -184,7 +232,7 @@ export default function TeacherTeachers() {
     });
 
     return list;
-  }, [teacherCandidates, approved, search, sortKey, asc]);
+  }, [teacherCandidates, sortKey, asc]);
 
   if (loading) {
     return (
@@ -232,7 +280,7 @@ export default function TeacherTeachers() {
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end" }}>
-            <button className="c-ctl c-btn" type="button" onClick={load} style={{ fontWeight: 900 }}>
+            <button className="c-ctl c-btn" type="button" onClick={() => load()} style={{ fontWeight: 900 }}>
               새로고침
             </button>
           </div>

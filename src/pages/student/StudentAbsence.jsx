@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
+import { isAbortError } from "../../lib/isAbortError";
 import { useMyProfile } from "../../hooks/useMyProfile";
 import { useNetworkStatus } from "../../hooks/useNetworkStatus";
 
@@ -42,16 +43,25 @@ export default function StudentAbsence() {
   const [saving, setSaving] = useState(false);
   const [draft, setDraft] = useState({ date: "", reason: "" });
 
-  async function fetchMine() {
+  const fetchMine = useCallback(async (signal) => {
     if (!uid) return;
+    await Promise.resolve();
+    if (signal?.aborted) return;
+
     setListLoading(true);
     setError("");
 
-    const { data, error } = await supabase
+    let query = supabase
       .from("absences")
       .select("id, student_id, date, reason, status, created_at")
       .eq("student_id", uid)
       .order("created_at", { ascending: false });
+
+    if (signal) query = query.abortSignal(signal);
+
+    const { data, error } = await query;
+
+    if (signal?.aborted || isAbortError(error)) return;
 
     if (error) {
       setError(error.message);
@@ -60,14 +70,31 @@ export default function StudentAbsence() {
       return;
     }
 
-    setItems(data ?? []);
-    setListLoading(false);
-  }
+    if (!signal?.aborted) {
+      setItems(data ?? []);
+      setListLoading(false);
+    }
+  }, [uid]);
 
   useEffect(() => {
-    if (!loading && uid) fetchMine();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, uid]);
+    if (loading || !uid) return undefined;
+
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => {
+      fetchMine(controller.signal).catch((err) => {
+        if (!isAbortError(err)) {
+          setError(err?.message ?? String(err));
+          setItems([]);
+          setListLoading(false);
+        }
+      });
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, [loading, uid, fetchMine]);
 
   const canSubmit = useMemo(() => {
     return draft.date && draft.reason.trim().length > 0;
@@ -100,7 +127,11 @@ export default function StudentAbsence() {
       status: "pending",
     };
 
-    const { error } = await supabase.from("absences").insert(payload);
+    const { data, error } = await supabase
+      .from("absences")
+      .insert(payload)
+      .select("id, student_id, date, reason, status, created_at")
+      .single();
 
     if (error) {
       setError(error.message);
@@ -109,8 +140,8 @@ export default function StudentAbsence() {
     }
 
     setDraft({ date: "", reason: "" });
+    setItems((prev) => [data, ...prev]);
     setSaving(false);
-    await fetchMine();
   }
 
   if (loading) {

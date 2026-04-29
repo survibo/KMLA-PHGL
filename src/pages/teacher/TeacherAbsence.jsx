@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
-import * as XLSX from "xlsx";
+import { isAbortError } from "../../lib/isAbortError";
 
 const SORTS = {
   DATE: "date",
@@ -14,11 +14,6 @@ const STATUS_LABEL = {
   rejected: "거절",
 };
 
-const STATUS_ORDER = {
-  pending: 0, // 대기
-  rejected: 1, // 거절
-  approved: 2, // 승인
-};
 function formatRequestedAt(iso) {
   if (!iso) return "-";
   const d = new Date(iso);
@@ -31,6 +26,46 @@ function formatRequestedAt(iso) {
   const mi = String(d.getMinutes()).padStart(2, "0");
 
   return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
+}
+
+function escapeSpreadsheetValue(value) {
+  if (typeof value !== "string") return value;
+  return /^[=+\-@]/.test(value) ? `'${value}` : value;
+}
+
+function matchesAbsenceFilters(row, { status, fromDate, toDate }) {
+  if (status !== "all" && (row.status ?? "") !== status) return false;
+  if (fromDate && (row.date ?? "") < fromDate) return false;
+  if (toDate && (row.date ?? "") > toDate) return false;
+  return true;
+}
+
+async function attachProfilesToAbsences(absences, signal) {
+  const list = absences ?? [];
+  const studentIds = list.map((a) => a.student_id).filter(Boolean);
+  const actorIds = list.map((a) => a.status_updated_by).filter(Boolean);
+  const ids = Array.from(new Set([...studentIds, ...actorIds]));
+
+  let map = new Map();
+  if (ids.length > 0) {
+    let query = supabase
+      .from("profiles")
+      .select("id, name, grade, class_no, student_no")
+      .in("id", ids);
+
+    if (signal) query = query.abortSignal(signal);
+
+    const { data: profiles, error } = await query;
+
+    if (error) throw error;
+    map = new Map((profiles ?? []).map((p) => [p.id, p]));
+  }
+
+  return list.map((a) => ({
+    ...a,
+    student: map.get(a.student_id) ?? null,
+    actor: a.status_updated_by ? (map.get(a.status_updated_by) ?? null) : null,
+  }));
 }
 
 export default function TeacherAbsences() {
@@ -50,64 +85,50 @@ export default function TeacherAbsences() {
 
   const [updatingId, setUpdatingId] = useState(null);
 
-  async function load() {
+  const load = useCallback(async (signal) => {
     setLoading(true);
     setError("");
 
-    const { data: absences, error: aErr } = await supabase
+    let query = supabase
       .from("absences")
       .select(
         "id, student_id, date, reason, status, created_at, status_updated_by, status_updated_at",
-      )
-      .order("created_at", { ascending: false });
+      );
 
-    if (aErr) {
-      setError(aErr.message);
-      setRows([]);
-      setLoading(false);
-      return;
+    if (status !== "all") query = query.eq("status", status);
+    if (fromDate) query = query.gte("date", fromDate);
+    if (toDate) query = query.lte("date", toDate);
+
+    query = query.order(sortKey, { ascending: asc });
+    if (sortKey !== SORTS.CREATED) {
+      query = query.order("created_at", { ascending: false });
     }
+    if (signal) query = query.abortSignal(signal);
 
-    const list = absences ?? [];
+    try {
+      const { data, error } = await query;
+      if (error) throw error;
+      if (signal?.aborted) return;
 
-    // 학생 + 마지막 처리자(teacher) 프로필을 같이 조회
-    const studentIds = list.map((a) => a.student_id).filter(Boolean);
-    const actorIds = list.map((a) => a.status_updated_by).filter(Boolean);
-
-    const ids = Array.from(new Set([...studentIds, ...actorIds]));
-
-    const { data: profiles, error: pErr } = await supabase
-      .from("profiles")
-      .select("id, name, grade, class_no, student_no")
-      .in("id", ids);
-
-    if (pErr) {
-      setError(pErr.message);
+      const nextRows = await attachProfilesToAbsences(data ?? [], signal);
+      if (!signal?.aborted) setRows(nextRows);
+    } catch (err) {
+      if (signal?.aborted || isAbortError(err)) return;
+      setError(err?.message ?? String(err));
       setRows([]);
-      setLoading(false);
-      return;
+    } finally {
+      if (!signal?.aborted) setLoading(false);
     }
+  }, [status, fromDate, toDate, sortKey, asc]);
 
-    const map = new Map((profiles ?? []).map((p) => [p.id, p]));
-
-    setRows(
-      list.map((a) => ({
-        ...a,
-        student: map.get(a.student_id) ?? null,
-        actor: a.status_updated_by
-          ? (map.get(a.status_updated_by) ?? null)
-          : null,
-      })),
-    );
-
-    setLoading(false);
-  }
 
   useEffect(() => {
-    load();
-  }, []);
+    const controller = new AbortController();
+    load(controller.signal);
+    return () => controller.abort();
+  }, [load]);
 
-  function exportToExcel() {
+  async function exportToExcel() {
     if (rows.length === 0) {
       window.alert("내보낼 데이터가 없습니다.");
       return;
@@ -123,19 +144,25 @@ export default function TeacherAbsences() {
       return ca.localeCompare(cb);
     });
 
-    const exportData = sorted.map((r) => ({
-      이름: r.student?.name ?? "-",
-      반: r.student?.class_no ?? "-",
-      번호: r.student?.student_no ?? "-",
-      결석날짜: r.date ?? "-",
-      사유: r.reason ?? "-",
-      상태: STATUS_LABEL[r.status] ?? r.status ?? "-",
-      요청일: formatRequestedAt(r.created_at),
-      처리자: r.actor?.name ?? "-",
-      처리일: r.status_updated_at
-        ? formatRequestedAt(r.status_updated_at)
-        : "-",
-    }));
+    const exportData = sorted.map((r) =>
+      Object.fromEntries(
+        Object.entries({
+          이름: r.student?.name ?? "-",
+          반: r.student?.class_no ?? "-",
+          번호: r.student?.student_no ?? "-",
+          결석날짜: r.date ?? "-",
+          사유: r.reason ?? "-",
+          상태: STATUS_LABEL[r.status] ?? r.status ?? "-",
+          요청일: formatRequestedAt(r.created_at),
+          처리자: r.actor?.name ?? "-",
+          처리일: r.status_updated_at
+            ? formatRequestedAt(r.status_updated_at)
+            : "-",
+        }).map(([key, value]) => [key, escapeSpreadsheetValue(value)]),
+      ),
+    );
+
+    const XLSX = await import("xlsx");
 
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
@@ -165,14 +192,27 @@ export default function TeacherAbsences() {
     try {
       setUpdatingId(absenceId);
 
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from("absences")
         .update({ status: nextStatus })
-        .eq("id", absenceId);
+        .eq("id", absenceId)
+        .select(
+          "id, student_id, date, reason, status, created_at, status_updated_by, status_updated_at",
+        )
+        .single();
 
       if (error) throw error;
 
-      await load();
+      const [updated] = await attachProfilesToAbsences([data]);
+      const filterState = { status, fromDate, toDate };
+
+      setRows((prev) => {
+        if (!matchesAbsenceFilters(updated, filterState)) {
+          return prev.filter((row) => row.id !== absenceId);
+        }
+
+        return prev.map((row) => (row.id === absenceId ? updated : row));
+      });
     } catch (err) {
       window.alert(`상태 변경 실패: ${err?.message ?? String(err)}`);
     } finally {
@@ -190,51 +230,8 @@ export default function TeacherAbsences() {
       );
     }
 
-    if (status !== "all") {
-      list = list.filter((r) => (r.status ?? "") === status);
-    }
-
-    if (fromDate) {
-      list = list.filter((r) => (r.date ?? "") >= fromDate);
-    }
-    if (toDate) {
-      list = list.filter((r) => (r.date ?? "") <= toDate);
-    }
-
-    list = [...list].sort((a, b) => {
-      if (sortKey === SORTS.DATE) {
-        const va = a.date ?? "";
-        const vb = b.date ?? "";
-        return asc ? va.localeCompare(vb) : vb.localeCompare(va);
-      }
-
-      if (sortKey === SORTS.STATUS) {
-        const va = STATUS_ORDER[a.status] ?? 9999;
-        const vb = STATUS_ORDER[b.status] ?? 9999;
-        return asc ? va - vb : vb - va;
-      }
-
-      if (sortKey === SORTS.CREATED) {
-        const va = a.created_at ?? "";
-        const vb = b.created_at ?? "";
-        return asc ? va.localeCompare(vb) : vb.localeCompare(va);
-      }
-
-      const ca = a.student?.class_no ?? 9999;
-      const cb = b.student?.class_no ?? 9999;
-      if (ca !== cb) return asc ? ca - cb : cb - ca;
-
-      const sa = a.student?.student_no ?? 9999;
-      const sb = b.student?.student_no ?? 9999;
-      if (sa !== sb) return asc ? sa - sb : sb - sa;
-
-      const na = String(a.student?.name ?? "");
-      const nb = String(b.student?.name ?? "");
-      return asc ? na.localeCompare(nb) : nb.localeCompare(na);
-    });
-
     return list;
-  }, [rows, search, status, fromDate, toDate, sortKey, asc]);
+  }, [rows, search]);
 
   if (loading) {
     return (
@@ -297,7 +294,7 @@ export default function TeacherAbsences() {
             <button
               className="c-ctl c-btn"
               type="button"
-              onClick={load}
+              onClick={() => load()}
               style={{ fontWeight: 900 }}
             >
               새로고침

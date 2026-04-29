@@ -9,6 +9,9 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
+      workbox: {
+        globIgnores: ['**/xlsx-*.js']
+      },
       manifest: {
         name: 'KMLA PHGL',
         short_name: 'PHGL',
