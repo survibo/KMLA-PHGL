@@ -4,6 +4,7 @@ import { BrowserRouter } from "react-router-dom";
 import { SpeedInsights } from "@vercel/speed-insights/react"
 import { Analytics } from "@vercel/analytics/react"
 import "./styles/index.css";
+import { MyProfileProvider } from "./hooks/useMyProfile.js";
 
 
 import App from "./App.jsx";
@@ -11,9 +12,11 @@ import App from "./App.jsx";
 createRoot(document.getElementById("root")).render(
   <StrictMode>
     <BrowserRouter>
-      <App />
-      <SpeedInsights />
-      <Analytics/>
+      <MyProfileProvider>
+        <App />
+        <SpeedInsights />
+        <Analytics/>
+      </MyProfileProvider>
     </BrowserRouter>
   </StrictMode>
 );

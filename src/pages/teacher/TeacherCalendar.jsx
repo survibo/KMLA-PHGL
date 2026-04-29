@@ -125,6 +125,18 @@ const parseDayParam = (raw, max = 6) => {
   return isNaN(n) ? 0 : clamp(n, 0, max);
 };
 
+const createCategoryTotals = (events) => {
+  const totals = Object.fromEntries(CATEGORIES.map((category) => [category, 0]));
+
+  for (const event of events) {
+    if (event.category in totals) {
+      totals[event.category] += event.duration_min ?? 0;
+    }
+  }
+
+  return totals;
+};
+
 const formatMinutesAsDecimalHours = (totalMinutes) => {
   const h = (totalMinutes ?? 0) / 60;
   return Number.isInteger(h) ? `${h}시간` : `${h.toFixed(1)}시간`;
@@ -210,11 +222,11 @@ async function fetchWeekEvents({ studentId, weekStartISO, weekEndISO }) {
 
 // ─── [추가] weekly_reflections 조회 ──────────────────────────────────────────
 
-async function fetchReflection({ uid, weekStartISO }) {
+async function fetchReflection({ studentId, weekStartISO }) {
   const { data, error } = await supabase
     .from("weekly_reflections")
     .select("id, content, updated_at")
-    .eq("owner_id", uid)
+    .eq("owner_id", studentId)
     .eq("week_start", weekStartISO)
     .maybeSingle();
 
@@ -352,7 +364,7 @@ function useReflection({ studentId, weekStartISO, enabled }) {
     let cancelled = false;
     dispatch({ type: "LOADING" });
 
-    fetchReflection({ uid: studentId, weekStartISO })
+    fetchReflection({ studentId, weekStartISO })
       .then((data) => {
         if (!cancelled) dispatch({ type: "SUCCESS", payload: data });
       })
@@ -484,18 +496,7 @@ function useTeacherCalendarState({ studentId, students, order }) {
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function WeeklySummary({ events, status }) {
-  const totals = useMemo(
-    () =>
-      Object.fromEntries(
-        CATEGORIES.map((cat) => [
-          cat,
-          events
-            .filter((ev) => ev.category === cat)
-            .reduce((sum, ev) => sum + (ev.duration_min ?? 0), 0),
-        ])
-      ),
-    [events]
-  );
+  const totals = useMemo(() => createCategoryTotals(events), [events]);
 
   return (
     <div
@@ -578,6 +579,7 @@ function StudentSearch({ students, currentStudentId, onSelect }) {
   const trimmedKeyword = keyword.trim();
   const filtered = useMemo(() => {
     const q = trimmedKeyword.toLowerCase();
+    const digitsOnlyQuery = q.replace(/[^0-9]/g, "");
     if (!q) return [];
 
     return students
@@ -590,8 +592,7 @@ function StudentSearch({ students, currentStudentId, onSelect }) {
           score += name === q ? 100 : 50;
         }
 
-        const pureDigit = q.replace(/[^0-9]/g, "");
-        if (pureDigit && cls === pureDigit) {
+        if (digitsOnlyQuery && cls === digitsOnlyQuery) {
           score += 70;
         }
 

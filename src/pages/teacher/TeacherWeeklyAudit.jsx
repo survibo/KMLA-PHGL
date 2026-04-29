@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import {
   addDays,
@@ -399,6 +399,7 @@ export default function TeacherWeeklyAudit() {
   const [error, setError] = useState("");
   const [students, setStudents] = useState([]);
   const [events, setEvents] = useState([]);
+  const requestIdRef = useRef(0);
 
   // 기본: 총 합, 오름차순(낮은 학생이 위)
   const [sortKey, setSortKey] = useState(SORTS.TOTAL);
@@ -418,28 +419,39 @@ export default function TeacherWeeklyAudit() {
 
   // ── 데이터 로더 ──
   const load = async ({ initial = false } = {}) => {
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
+
     setError("");
     if (!initial) setRefreshing(true);
 
     try {
       if (!booted || students.length === 0) {
         const ps = await fetchStudents();
+        if (requestId !== requestIdRef.current) return;
         setStudents(ps);
       }
 
       const es = await fetchWeekEvents(weekStartISO, weekEndISO);
+      if (requestId !== requestIdRef.current) return;
       setEvents(es);
     } catch (err) {
+      if (requestId !== requestIdRef.current) return;
       setError(err?.message ?? String(err));
     } finally {
-      if (!booted) setBooted(true);
-      setRefreshing(false);
+      if (requestId === requestIdRef.current) {
+        if (!booted) setBooted(true);
+        setRefreshing(false);
+      }
     }
   };
 
   // 최초 1회
   useEffect(() => {
     load({ initial: true });
+    return () => {
+      requestIdRef.current += 1;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -447,6 +459,9 @@ export default function TeacherWeeklyAudit() {
   useEffect(() => {
     if (!booted) return;
     load({ initial: false });
+    return () => {
+      requestIdRef.current += 1;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [weekStartISO, weekEndISO]);
 

@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  createContext,
+  createElement,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { supabase } from "../lib/supabase";
 
 // ─── Supabase API helpers ──────────────────────────────────────────────────────
@@ -26,22 +34,34 @@ async function fetchProfileFromSupabase(userId) {
   return data ?? null;
 }
 
-// ─── Hook ─────────────────────────────────────────────────────────────────────
+// ─── Provider / Hook ──────────────────────────────────────────────────────────
 
-export function useMyProfile() {
+const MyProfileContext = createContext(null);
+
+export function MyProfileProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
   const isFetchingRef = useRef(false);
+  const mountedRef = useRef(false);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const refresh = useCallback(async ({ showLoading = false } = {}) => {
     if (isFetchingRef.current) return;
     isFetchingRef.current = true;
 
     try {
-      if (showLoading) setLoading(true);
+      if (showLoading && mountedRef.current) setLoading(true);
 
       const nextSession = await fetchSessionFromSupabase();
+      if (!mountedRef.current) return;
+
       setSession(nextSession);
 
       if (!nextSession) {
@@ -50,10 +70,12 @@ export function useMyProfile() {
       }
 
       const nextProfile = await fetchProfileFromSupabase(nextSession.user.id);
+      if (!mountedRef.current) return;
+
       setProfile(nextProfile);
     } finally {
       isFetchingRef.current = false;
-      setLoading(false);
+      if (mountedRef.current) setLoading(false);
     }
   }, []);
 
@@ -99,11 +121,23 @@ export function useMyProfile() {
     };
   }, [refresh]);
 
-  return {
+  const value = {
     loading,
     session,
     profile,
     refreshProfile: () => refresh({ showLoading: true }),
     refreshProfileSilent: () => refresh({ showLoading: false }),
   };
+
+  return createElement(MyProfileContext.Provider, { value }, children);
+}
+
+export function useMyProfile() {
+  const value = useContext(MyProfileContext);
+
+  if (!value) {
+    throw new Error("useMyProfile must be used within MyProfileProvider");
+  }
+
+  return value;
 }

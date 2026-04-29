@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import { useMyProfile } from "../../hooks/useMyProfile";
 import { useNetworkStatus } from "../../hooks/useNetworkStatus";
@@ -10,6 +10,11 @@ import {
   startOfWeekMonday,
   toISODate,
 } from "../../features/week";
+import {
+  getWeekEditDeadline,
+  isWeekEditable,
+  WEEK_EDIT_POLICY,
+} from "../../features/weekEditPolicy";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -18,33 +23,23 @@ const DOW = ["월", "화", "수", "목", "금", "토", "일"];
 const TITLE_MAX = 50;
 const DESC_MAX = 200;
 
-/**
- * 주 탐색 접근 정책 설정
- *
- * prevWeekAccess:
- *   - allowedUntil: 저번 주에 접근 가능한 마감 시점
- *     - dayOfWeek: 0=일 ~ 6=토 (JS 기본 요일)
- *     - hour / minute: 해당 시각 (로컬 시간 기준)
- *   - 예) 매주 월요일 08:30까지 저번 주 접근 허용
- *     → { dayOfWeek: 1, hour: 8, minute: 30 }
- *
- * nextWeekLimit:
- *   - maxWeeksAhead: 이번 주 기준 몇 주 앞까지 허용할지 (기본 2 → 이번 주 포함 총 3주)
- */
-const WEEK_ACCESS_POLICY = {
-  prevWeekAccess: {
-    allowedUntil: { dayOfWeek: 1, hour: 8, minute: 30 },
-  },
-  nextWeekLimit: {
-    maxWeeksAhead: 2,
-  },
-};
-
 const DEFAULT_DRAFT = {
   category: CATEGORIES[0],
   title: "",
   description: "",
   minutes: "",
+};
+
+const createCategoryTotals = (events) => {
+  const totals = Object.fromEntries(CATEGORIES.map((category) => [category, 0]));
+
+  for (const event of events) {
+    if (event.category in totals) {
+      totals[event.category] += event.duration_min || 0;
+    }
+  }
+
+  return totals;
 };
 
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
@@ -94,37 +89,15 @@ function formatDateTimeKST(iso) {
   return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
 }
 
-/**
- * 저번 주 접근 가능 여부 판단
- *
- * 현재 시각이 policy.allowedUntil 이전이면 true를 반환한다.
- * 예) allowedUntil = { dayOfWeek: 1, hour: 8, minute: 30 }
- *   → 매주 월요일 08:30 이전에는 저번 주 접근 허용
- *
- * @param {{ dayOfWeek: number, hour: number, minute: number }} allowedUntil
- * @param {Date} [now]
- */
-function isPrevWeekAccessible(allowedUntil, now = new Date()) {
-  const { dayOfWeek, hour, minute } = allowedUntil;
-  const nowDay = now.getDay(); // 0=일 ~ 6=토
-
-  if (nowDay !== dayOfWeek) return nowDay < dayOfWeek;
-
-  // 같은 요일이면 시:분 비교
-  const nowMinutes = now.getHours() * 60 + now.getMinutes();
-  const limitMinutes = hour * 60 + minute;
-  return nowMinutes < limitMinutes;
-}
-
 // ─── Supabase API ─────────────────────────────────────────────────────────────
 
-async function fetchWeekEvents({ uid, weekStartISO, weekEndISO }) {
+async function fetchWeekEvents({ userId, weekStartISO, weekEndISO }) {
   const { data, error } = await supabase
     .from("events")
     .select(
       "id, owner_id, title, description, category, date, duration_min, is_done, created_at"
     )
-    .eq("owner_id", uid)
+    .eq("owner_id", userId)
     .gte("date", weekStartISO)
     .lte("date", weekEndISO)
     .order("date", { ascending: true })
@@ -135,8 +108,15 @@ async function fetchWeekEvents({ uid, weekStartISO, weekEndISO }) {
 }
 
 async function insertEvent(payload) {
-  const { error } = await supabase.from("events").insert(payload);
+  const { data, error } = await supabase
+    .from("events")
+    .insert(payload)
+    .select(
+      "id, owner_id, title, description, category, date, duration_min, is_done, created_at"
+    )
+    .single();
   if (error) throw new Error(error.message);
+  return data;
 }
 
 async function deleteEventById(id) {
@@ -152,11 +132,11 @@ async function updateEventDoneById({ id, isDone }) {
   if (error) throw new Error(error.message);
 }
 
-async function fetchReflection({ uid, weekStartISO }) {
+async function fetchReflection({ userId, weekStartISO }) {
   const { data, error } = await supabase
     .from("weekly_reflections")
     .select("id, content, updated_at")
-    .eq("owner_id", uid)
+    .eq("owner_id", userId)
     .eq("week_start", weekStartISO)
     .maybeSingle();
 
@@ -164,43 +144,66 @@ async function fetchReflection({ uid, weekStartISO }) {
   return data ?? null;
 }
 
-async function upsertReflection({ uid, weekStartISO, content }) {
+async function upsertReflection({ userId, weekStartISO, content }) {
   const { error } = await supabase
     .from("weekly_reflections")
     .upsert(
-      { owner_id: uid, week_start: weekStartISO, content },
+      { owner_id: userId, week_start: weekStartISO, content },
       { onConflict: "owner_id,week_start" }
     );
   if (error) throw new Error(error.message);
 }
 
+function sortEventsByDateCreated(a, b) {
+  const dateDiff = String(a.date ?? "").localeCompare(String(b.date ?? ""));
+  if (dateDiff !== 0) return dateDiff;
+  return String(a.created_at ?? "").localeCompare(String(b.created_at ?? ""));
+}
+
 // ─── Local custom hook ────────────────────────────────────────────────────────
 
-function useWeekEvents({ uid, weekStartISO, weekEndISO }) {
+function useWeekEvents({ userId, weekStartISO, weekEndISO }) {
   const [events, setEvents] = useState([]);
   const [fetching, setFetching] = useState(true);
   const [error, setError] = useState("");
+  const requestIdRef = useRef(0);
+  const mountedRef = useRef(false);
 
-  const load = useCallback(async () => {
-    if (!uid) return;
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      requestIdRef.current += 1;
+    };
+  }, []);
+
+  const reloadWeekEvents = useCallback(async () => {
+    if (!userId) return;
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
+
     setFetching(true);
     setError("");
     try {
-      const data = await fetchWeekEvents({ uid, weekStartISO, weekEndISO });
+      const data = await fetchWeekEvents({ userId, weekStartISO, weekEndISO });
+      if (!mountedRef.current || requestId !== requestIdRef.current) return;
       setEvents(data);
     } catch (err) {
+      if (!mountedRef.current || requestId !== requestIdRef.current) return;
       setError(err.message);
       setEvents([]);
     } finally {
-      setFetching(false);
+      if (mountedRef.current && requestId === requestIdRef.current) {
+        setFetching(false);
+      }
     }
-  }, [uid, weekStartISO, weekEndISO]);
+  }, [userId, weekStartISO, weekEndISO]);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    reloadWeekEvents();
+  }, [reloadWeekEvents]);
 
-  return { events, setEvents, fetching, error, reload: load };
+  return { events, setEvents, fetching, error, reload: reloadWeekEvents };
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -270,7 +273,7 @@ function WeeklySummary({ totals }) {
   );
 }
 
-function EventCard({ event, onDelete }) {
+function EventCard({ event, onDelete, disabled = false }) {
   return (
     <div
       className="u-panel"
@@ -300,7 +303,7 @@ function EventCard({ event, onDelete }) {
             <EventDescription>{event.description}</EventDescription>
           )}
         </div>
-        <DeleteButton onClick={() => onDelete(event.id)} />
+        <DeleteButton onClick={() => onDelete(event.id)} disabled={disabled} />
       </div>
     </div>
   );
@@ -367,7 +370,7 @@ function TodoItem({ event, checked, onToggle, onDelete, disabled }) {
             )}
           </div>
         </label>
-        <DeleteButton onClick={() => onDelete(event.id)} />
+        <DeleteButton onClick={() => onDelete(event.id)} disabled={disabled} />
       </div>
     </div>
   );
@@ -416,12 +419,13 @@ function EventDescription({ children, strikethrough = false }) {
   );
 }
 
-function DeleteButton({ onClick }) {
+function DeleteButton({ onClick, disabled = false }) {
   return (
     <button
       className="c-ctl c-btn c-btn--danger"
       type="button"
       onClick={onClick}
+      disabled={disabled}
       style={{
         width: 60,
         height: 32,
@@ -438,7 +442,15 @@ function DeleteButton({ onClick }) {
   );
 }
 
-function AddEventForm({ draft, onChange, onSubmit, onCancel, saving, error }) {
+function AddEventForm({
+  draft,
+  onChange,
+  onSubmit,
+  onCancel,
+  saving,
+  error,
+  disabled = false,
+}) {
   return (
     <div className="l-section">
       {error && <div className="u-alert u-alert--error">{error}</div>}
@@ -449,6 +461,7 @@ function AddEventForm({ draft, onChange, onSubmit, onCancel, saving, error }) {
           className="c-ctl c-input"
           value={draft.category}
           onChange={(e) => onChange("category", e.target.value)}
+          disabled={disabled}
         >
           {CATEGORIES.map((c) => (
             <option key={c} value={c}>
@@ -467,6 +480,7 @@ function AddEventForm({ draft, onChange, onSubmit, onCancel, saving, error }) {
           placeholder="수학의 정석 1단원 연습문제"
           autoFocus
           maxLength={TITLE_MAX}
+          disabled={disabled}
         />
         <CharCount value={draft.title} max={TITLE_MAX} />
       </div>
@@ -482,6 +496,7 @@ function AddEventForm({ draft, onChange, onSubmit, onCancel, saving, error }) {
           value={draft.minutes}
           onChange={(e) => onChange("minutes", e.target.value)}
           placeholder="60"
+          disabled={disabled}
         />
         <div className="f-hint">예시: 30, 60</div>
       </div>
@@ -495,6 +510,7 @@ function AddEventForm({ draft, onChange, onSubmit, onCancel, saving, error }) {
           placeholder="수학의 정석 연습문제 1-1 ~ 1-10"
           rows={3}
           maxLength={DESC_MAX}
+          disabled={disabled}
         />
         <CharCount value={draft.description} max={DESC_MAX} />
       </div>
@@ -512,7 +528,7 @@ function AddEventForm({ draft, onChange, onSubmit, onCancel, saving, error }) {
           className="c-ctl c-btn"
           type="button"
           onClick={onSubmit}
-          disabled={saving}
+          disabled={saving || disabled}
         >
           {saving ? "저장중..." : "등록"}
         </button>
@@ -525,21 +541,26 @@ function AddEventForm({ draft, onChange, onSubmit, onCancel, saving, error }) {
 
 export default function StudentCalendar() {
   const { session, loading } = useMyProfile();
-  const uid = session?.user?.id;
+  const userId = session?.user?.id;
   const isOnline = useNetworkStatus();
   const { viewMode } = useCalendarView();
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(new Date()), 30 * 1000);
+    return () => window.clearInterval(id);
+  }, []);
 
   // ── 주 탐색 경계 계산 ──
-  const thisMonday = useMemo(() => startOfWeekMonday(new Date()), []);
+  const thisMonday = useMemo(() => startOfWeekMonday(now), [now]);
 
   /**
    * 저번 주 접근 가능 여부를 실시간으로 판단
    * policy 기준: 매주 월요일 08:30 이전이면 저번 주 허용
    */
   const canAccessPrevWeek = useMemo(
-    () => isPrevWeekAccessible(WEEK_ACCESS_POLICY.prevWeekAccess.allowedUntil),
-
-    [] // 컴포넌트 마운트 시 한 번 계산 (주 이동 중 변하지 않음)
+    () => isWeekEditable(toISODate(addDays(thisMonday, -7)), now),
+    [thisMonday, now]
   );
 
   const minMonday = useMemo(
@@ -552,15 +573,20 @@ export default function StudentCalendar() {
 
   const maxMonday = useMemo(
     () =>
-      addDays(thisMonday, WEEK_ACCESS_POLICY.nextWeekLimit.maxWeeksAhead * 7),
+      addDays(thisMonday, WEEK_EDIT_POLICY.nextWeekLimit.maxWeeksAhead * 7),
     [thisMonday]
   );
 
   // ── 주 탐색 상태 ──
-  const [weekBase, setWeekBase] = useState(() => startOfWeekMonday(new Date()));
-  const [selectedIdx, setSelectedIdx] = useState(getTodayDowIndex);
+  const [weekAnchorDate, setWeekAnchorDate] = useState(() =>
+    startOfWeekMonday(new Date())
+  );
+  const [selectedDayIndex, setSelectedDayIndex] = useState(getTodayDowIndex);
 
-  const monday = useMemo(() => startOfWeekMonday(weekBase), [weekBase]);
+  const monday = useMemo(
+    () => startOfWeekMonday(weekAnchorDate),
+    [weekAnchorDate]
+  );
   const weekDays = useMemo(
     () => Array.from({ length: 7 }, (_, i) => addDays(monday, i)),
     [monday]
@@ -570,10 +596,24 @@ export default function StudentCalendar() {
   const canNext = monday.getTime() < maxMonday.getTime();
   const isThisWeek = toISODate(monday) === toISODate(thisMonday);
 
-  const selectedDate = weekDays[selectedIdx];
+  const selectedDate = weekDays[selectedDayIndex];
   const selectedISO = toISODate(selectedDate);
   const weekStartISO = toISODate(monday);
   const weekEndISO = toISODate(addDays(monday, 6));
+  const canEditSelectedWeek = useMemo(
+    () => isWeekEditable(weekStartISO, now),
+    [weekStartISO, now]
+  );
+  const selectedWeekDeadline = useMemo(
+    () => getWeekEditDeadline(weekStartISO),
+    [weekStartISO]
+  );
+
+  useEffect(() => {
+    if (monday.getTime() >= minMonday.getTime()) return;
+    setSelectedDayIndex(0);
+    setWeekAnchorDate(minMonday);
+  }, [monday, minMonday]);
 
   // ── 이벤트 데이터 ──
   const {
@@ -581,8 +621,11 @@ export default function StudentCalendar() {
     setEvents,
     fetching,
     error: fetchError,
-    reload,
-  } = useWeekEvents({ uid: loading ? null : uid, weekStartISO, weekEndISO });
+  } = useWeekEvents({
+    userId: loading ? null : userId,
+    weekStartISO,
+    weekEndISO,
+  });
 
   const eventsByDate = useMemo(() => {
     const map = new Map(weekDays.map((d) => [toISODate(d), []]));
@@ -592,18 +635,7 @@ export default function StudentCalendar() {
     return map;
   }, [events, weekDays]);
 
-  const totals = useMemo(
-    () =>
-      Object.fromEntries(
-        CATEGORIES.map((cat) => [
-          cat,
-          events
-            .filter((ev) => ev.category === cat)
-            .reduce((sum, ev) => sum + (ev.duration_min || 0), 0),
-        ])
-      ),
-    [events]
-  );
+  const totals = useMemo(() => createCategoryTotals(events), [events]);
 
   const selectedList = useMemo(
     () => eventsByDate.get(selectedISO) ?? [],
@@ -617,23 +649,36 @@ export default function StudentCalendar() {
 
   const [togglingMap, setTogglingMap] = useState({});
 
+  const ensureSelectedWeekEditable = useCallback(() => {
+    if (isWeekEditable(weekStartISO, new Date())) return true;
+
+    window.alert(
+      `이 주의 수정 가능 시간이 지났습니다. 마감: ${formatDateTimeKST(
+        selectedWeekDeadline?.toISOString()
+      )}`
+    );
+    setNow(new Date());
+    return false;
+  }, [selectedWeekDeadline, weekStartISO]);
+
   // ── 주 이동 ──
   const navigateWeek = useCallback(
     (offsetDays) => {
-      setSelectedIdx(0);
-      setWeekBase(addDays(monday, offsetDays));
+      setSelectedDayIndex(0);
+      setWeekAnchorDate(addDays(monday, offsetDays));
     },
     [monday]
   );
 
   const goToThisWeek = useCallback(() => {
-    setSelectedIdx(getTodayDowIndex());
-    setWeekBase(startOfWeekMonday(new Date()));
+    setSelectedDayIndex(getTodayDowIndex());
+    setWeekAnchorDate(startOfWeekMonday(new Date()));
   }, []);
 
   // ── 완료 토글 ──
   const toggleChecked = useCallback(
     async (eventId, nextChecked) => {
+      if (!ensureSelectedWeekEditable()) return;
       if (togglingMap[eventId]) return;
 
       setTogglingMap((prev) => ({ ...prev, [eventId]: true }));
@@ -662,7 +707,7 @@ export default function StudentCalendar() {
         });
       }
     },
-    [togglingMap, setEvents]
+    [ensureSelectedWeekEditable, togglingMap, setEvents]
   );
 
   // ── 이벤트 추가 모달 상태 ──
@@ -683,16 +728,18 @@ export default function StudentCalendar() {
   }, []);
 
   const openAddModal = useCallback(() => {
+    if (!ensureSelectedWeekEditable()) return;
     setFormError("");
     setDraft({ ...DEFAULT_DRAFT });
     setAddOpen(true);
-  }, []);
+  }, [ensureSelectedWeekEditable]);
 
   const closeAddModal = useCallback(() => setAddOpen(false), []);
 
   // ── 이벤트 추가 ──
   const handleAddEvent = useCallback(async () => {
-    if (!uid) return;
+    if (!userId) return;
+    if (!ensureSelectedWeekEditable()) return;
 
     const trimmedTitle = draft.title.trim();
     const trimmedDesc = draft.description.trim();
@@ -724,8 +771,8 @@ export default function StudentCalendar() {
     setFormError("");
 
     try {
-      await insertEvent({
-        owner_id: uid,
+      const created = await insertEvent({
+        owner_id: userId,
         date: selectedISO,
         category: draft.category,
         title: trimmedTitle,
@@ -734,69 +781,84 @@ export default function StudentCalendar() {
         is_done: false,
       });
       setAddOpen(false);
-      await reload();
+      setEvents((prev) => [...prev, created].sort(sortEventsByDateCreated));
     } catch (err) {
       setFormError(err.message);
     } finally {
       setSaving(false);
     }
-  }, [uid, draft, selectedISO, reload]);
+  }, [userId, draft, selectedISO, setEvents, ensureSelectedWeekEditable]);
 
   // ── 이벤트 삭제 ──
   const handleDeleteEvent = useCallback(
     async (id) => {
+      if (!ensureSelectedWeekEditable()) return;
       if (!window.confirm("이 항목을 삭제하겠습니까?")) return;
       try {
         await deleteEventById(id);
-        await reload();
+        setEvents((prev) => prev.filter((event) => event.id !== id));
       } catch (err) {
         window.alert(err.message);
       }
     },
-    [reload]
+    [ensureSelectedWeekEditable, setEvents]
   );
 
   // ── 주간 성찰 ──
   const [reflection, setReflection] = useState(null);
-  const [refDraft, setRefDraft] = useState("");
-  const [refSaving, setRefSaving] = useState(false);
-  const [refError, setRefError] = useState("");
-  const [refEditing, setRefEditing] = useState(false);
+  const [reflectionDraft, setReflectionDraft] = useState("");
+  const [isSavingReflection, setIsSavingReflection] = useState(false);
+  const [reflectionError, setReflectionError] = useState("");
+  const [isEditingReflection, setIsEditingReflection] = useState(false);
 
   useEffect(() => {
-    if (!uid) return;
+    if (!userId) return;
     setReflection(null);
-    setRefDraft("");
-    setRefEditing(false);
-    setRefError("");
+    setReflectionDraft("");
+    setIsEditingReflection(false);
+    setReflectionError("");
 
-    fetchReflection({ uid, weekStartISO })
+    let cancelled = false;
+
+    fetchReflection({ userId, weekStartISO })
       .then((data) => {
+        if (cancelled) return;
         setReflection(data);
-        setRefDraft(data?.content ?? "");
+        setReflectionDraft(data?.content ?? "");
       })
-      .catch((err) => setRefError(err.message));
-  }, [uid, weekStartISO]);
+      .catch((err) => {
+        if (!cancelled) setReflectionError(err.message);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, weekStartISO]);
 
   const handleSaveReflection = useCallback(async () => {
-    if (!refDraft.trim()) return;
-    setRefSaving(true);
-    setRefError("");
+    if (!reflectionDraft.trim()) return;
+    if (!ensureSelectedWeekEditable()) return;
+    setIsSavingReflection(true);
+    setReflectionError("");
     try {
-      await upsertReflection({ uid, weekStartISO, content: refDraft.trim() });
-      const updated = await fetchReflection({ uid, weekStartISO });
+      await upsertReflection({
+        userId,
+        weekStartISO,
+        content: reflectionDraft.trim(),
+      });
+      const updated = await fetchReflection({ userId, weekStartISO });
       setReflection(updated);
-      setRefEditing(false);
+      setIsEditingReflection(false);
     } catch (err) {
-      setRefError(err.message);
+      setReflectionError(err.message);
     } finally {
-      setRefSaving(false);
+      setIsSavingReflection(false);
     }
-  }, [uid, weekStartISO, refDraft]);
+  }, [userId, weekStartISO, reflectionDraft, ensureSelectedWeekEditable]);
 
   const handleCancelReflection = useCallback(() => {
-    setRefDraft(reflection?.content ?? "");
-    setRefEditing(false);
+    setReflectionDraft(reflection?.content ?? "");
+    setIsEditingReflection(false);
   }, [reflection]);
 
   // ── 렌더 ──
@@ -900,7 +962,7 @@ export default function StudentCalendar() {
         {weekDays.map((day, idx) => {
           const iso = toISODate(day);
           const count = (eventsByDate.get(iso) ?? []).length;
-          const active = idx === selectedIdx;
+          const active = idx === selectedDayIndex;
 
           return (
             <button
@@ -908,7 +970,7 @@ export default function StudentCalendar() {
               type="button"
               role="tab"
               aria-selected={active}
-              onClick={() => setSelectedIdx(idx)}
+              onClick={() => setSelectedDayIndex(idx)}
               className="c-ctl c-btn"
               style={{
                 minWidth: 92,
@@ -957,12 +1019,24 @@ export default function StudentCalendar() {
           }}
         >
           <div style={{ fontWeight: 900 }}>
-            {DOW[selectedIdx]}요일 · {formatKoreanMD(selectedDate)}
+            {DOW[selectedDayIndex]}요일 · {formatKoreanMD(selectedDate)}
             {viewMode === "todo"
               ? ` · 완료 ${selectedDoneCount}/${selectedList.length}`
               : ""}
           </div>
-          <button className="c-ctl c-btn" type="button" onClick={openAddModal}>
+          <button
+            className="c-ctl c-btn"
+            type="button"
+            onClick={openAddModal}
+            disabled={!canEditSelectedWeek}
+            title={
+              canEditSelectedWeek
+                ? undefined
+                : `수정 마감: ${formatDateTimeKST(
+                    selectedWeekDeadline?.toISOString()
+                  )}`
+            }
+          >
             일정 추가
           </button>
         </div>
@@ -986,7 +1060,9 @@ export default function StudentCalendar() {
                       checked={Boolean(ev.is_done)}
                       onToggle={toggleChecked}
                       onDelete={handleDeleteEvent}
-                      disabled={Boolean(togglingMap[ev.id])}
+                      disabled={
+                        Boolean(togglingMap[ev.id]) || !canEditSelectedWeek
+                      }
                     />
                   ))
                 : selectedList.map((ev) => (
@@ -994,6 +1070,7 @@ export default function StudentCalendar() {
                       key={ev.id}
                       event={ev}
                       onDelete={handleDeleteEvent}
+                      disabled={!canEditSelectedWeek}
                     />
                   ))}
             </div>
@@ -1012,24 +1089,32 @@ export default function StudentCalendar() {
           }}
         >
           <div style={{ fontWeight: 900 }}>주간 성찰</div>
-          {reflection && !refEditing && (
+          {reflection && !isEditingReflection && (
             <button
               className="c-ctl c-btn"
               type="button"
-              onClick={() => setRefEditing(true)}
+              onClick={() => setIsEditingReflection(true)}
+              disabled={!canEditSelectedWeek}
+              title={
+                canEditSelectedWeek
+                  ? undefined
+                  : `수정 마감: ${formatDateTimeKST(
+                      selectedWeekDeadline?.toISOString()
+                    )}`
+              }
             >
               수정
             </button>
           )}
         </div>
 
-        {refError && (
+        {reflectionError && (
           <div className="u-alert u-alert--error" style={{ marginBottom: 10 }}>
-            {refError}
+            {reflectionError}
           </div>
         )}
 
-        {reflection && !refEditing ? (
+        {reflection && !isEditingReflection ? (
           <div
             style={{
               whiteSpace: "pre-wrap",
@@ -1046,10 +1131,11 @@ export default function StudentCalendar() {
           <textarea
             className="c-ctl c-textarea"
             rows={5}
-            value={refDraft}
-            onChange={(e) => setRefDraft(e.target.value)}
+            value={reflectionDraft}
+            onChange={(e) => setReflectionDraft(e.target.value)}
             placeholder="이번 주를 돌아보며 느낀 점을 작성해주세요."
-            autoFocus={refEditing}
+            autoFocus={isEditingReflection}
+            disabled={!canEditSelectedWeek}
           />
         )}
 
@@ -1067,14 +1153,14 @@ export default function StudentCalendar() {
               : "아직 작성되지 않았습니다."}
           </div>
 
-          {(!reflection || refEditing) && (
+          {(!reflection || isEditingReflection) && (
             <div style={{ display: "flex", gap: 8 }}>
-              {refEditing && (
+              {isEditingReflection && (
                 <button
                   className="c-ctl c-btn"
                   type="button"
                   onClick={handleCancelReflection}
-                  disabled={refSaving}
+                  disabled={isSavingReflection}
                 >
                   취소
                 </button>
@@ -1084,12 +1170,13 @@ export default function StudentCalendar() {
                 type="button"
                 onClick={handleSaveReflection}
                 disabled={
-                  refSaving ||
-                  !refDraft.trim() ||
-                  refDraft.trim() === reflection?.content
+                  isSavingReflection ||
+                  !canEditSelectedWeek ||
+                  !reflectionDraft.trim() ||
+                  reflectionDraft.trim() === reflection?.content
                 }
               >
-                {refSaving ? "저장 중..." : "저장"}
+                {isSavingReflection ? "저장 중..." : "저장"}
               </button>
             </div>
           )}
@@ -1099,7 +1186,7 @@ export default function StudentCalendar() {
       {/* ── 추가 모달 ── */}
       <Modal
         open={addOpen}
-        title={`${DOW[selectedIdx]}요일 (${formatKoreanMD(
+        title={`${DOW[selectedDayIndex]}요일 (${formatKoreanMD(
           selectedDate
         )}) 일정 추가`}
         onClose={closeAddModal}
@@ -1111,6 +1198,7 @@ export default function StudentCalendar() {
           onCancel={closeAddModal}
           saving={saving}
           error={formError}
+          disabled={!canEditSelectedWeek}
         />
       </Modal>
     </div>

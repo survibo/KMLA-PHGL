@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "../../lib/supabase";
+import { isAbortError } from "../../lib/isAbortError";
 
 const SORTS = {
   STUDENT_NO: "student_no",
@@ -26,17 +27,27 @@ export default function TeacherStudents() {
   const [grantTarget, setGrantTarget] = useState(null); // profiles row
   const [grantingId, setGrantingId] = useState(null);
 
-  useEffect(() => {
-    const load = async () => {
+  const load = useCallback(
+    async (signal) => {
       setLoading(true);
       setError("");
 
-      // ✅ role 조건 제거(teacher/기타가 있어도 화면에서는 student만 보여주면 됨)
-      const { data, error } = await supabase
+      const q = search.trim();
+      let query = supabase
         .from("profiles")
         .select(
           "id, name, grade, class_no, student_no, approved, role, is_hidden"
-        );
+        )
+        .eq("role", "student")
+        .eq("is_hidden", false)
+        .order(sortKey, { ascending: asc, nullsFirst: false });
+
+      if (q) query = query.ilike("name", `%${q}%`);
+      if (signal) query = query.abortSignal(signal);
+
+      const { data, error } = await query;
+
+      if (signal?.aborted || isAbortError(error)) return;
 
       if (error) {
         setError(error.message);
@@ -45,40 +56,31 @@ export default function TeacherStudents() {
         setStudents(data ?? []);
       }
 
-      setLoading(false);
-    };
+      if (!signal?.aborted) setLoading(false);
+    },
+    [search, sortKey, asc],
+  );
 
-    load();
-  }, []);
+  useEffect(() => {
+    const controller = new AbortController();
 
-  // ✅ 화면에 보여줄 "학생"만 (DB에는 teacher도 있을 수 있으니 여기서 필터)
-  const filtered = useMemo(() => {
-    let list = students.filter(
-      (s) => (s.role ?? "student") === "student" && !s.is_hidden
-    );
-
-    if (search.trim()) {
-      const q = search.trim().toLowerCase();
-      list = list.filter((s) => (s.name ?? "").toLowerCase().includes(q));
-    }
-
-    list = [...list].sort((a, b) => {
-      const va = a[sortKey];
-      const vb = b[sortKey];
-
-      if (sortKey === SORTS.APPROVED) {
-        return asc ? Number(va) - Number(vb) : Number(vb) - Number(va);
+    load(controller.signal).catch((err) => {
+      if (!isAbortError(err)) {
+        setError(err?.message ?? String(err));
+        setStudents([]);
+        setLoading(false);
       }
-
-      if (va == null && vb == null) return 0;
-      if (va == null) return asc ? 1 : -1;
-      if (vb == null) return asc ? -1 : 1;
-
-      return asc ? va - vb : vb - va;
     });
 
-    return list;
-  }, [students, search, sortKey, asc]);
+    return () => controller.abort();
+  }, [load]);
+
+  // 서버에서 role/search/sort를 처리하고, 클라이언트에서는 안전망만 둔다.
+  const filtered = useMemo(() => {
+    return students.filter(
+      (s) => (s.role ?? "student") === "student" && !s.is_hidden
+    );
+  }, [students]);
 
   // ✅ 현재 필터 결과 중 "미승인"만
   const pendingInFiltered = useMemo(() => {
