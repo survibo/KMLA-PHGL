@@ -6,6 +6,10 @@ import {
   startOfWeekMonday,
   toISODate,
 } from "../../features/week";
+import {
+  matchesTeacherYear,
+  useTeacherYearFilter,
+} from "../../lib/useTeacherYearFilter";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -79,11 +83,10 @@ function buildSorter(sortKey, asc) {
 async function fetchStudents() {
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, approved, name, grade, class_no, student_no, role")
+    .select("id, approved, name, grade, class_no, student_no, role, created_at")
     .eq("role", "student")
     .eq("approved", true)
-    .eq("is_hidden", false)
-
+    .eq("is_hidden", false);
 
   if (error) throw error;
   return data ?? [];
@@ -394,6 +397,7 @@ function AuditTable({ rows }) {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function TeacherWeeklyAudit() {
+  const { year } = useTeacherYearFilter();
   const [booted, setBooted] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
@@ -491,7 +495,10 @@ export default function TeacherWeeklyAudit() {
     const sorter = buildSorter(sortKey, asc);
 
     return students
-      .filter((s) => (s.role ?? "student") === "student")
+      .filter(
+        (s) =>
+          (s.role ?? "student") === "student" && matchesTeacherYear(s, year)
+      )
       .map((s) => {
         const m = minutesByStudent.get(s.id) ?? {
           total: 0,
@@ -508,7 +515,7 @@ export default function TeacherWeeklyAudit() {
         };
       })
       .sort(sorter);
-  }, [students, minutesByStudent, sortKey, asc]);
+  }, [students, minutesByStudent, sortKey, asc, year]);
 
   // ── 핸들러 ──
   const goPrevWeek = () => setAnchorDate((d) => addDays(d, -7));

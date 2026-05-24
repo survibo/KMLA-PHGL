@@ -1,7 +1,13 @@
 import { NavLink, useLocation } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { useMyProfile } from "../hooks/useMyProfile";
 import { useTheme } from "../lib/useTheme";
+import {
+  ALL_TEACHER_YEARS,
+  getCreatedYear,
+  useTeacherYearFilter,
+} from "../lib/useTeacherYearFilter";
 
 function Tab({ to, label, matchPath }) {
   const location = useLocation(); // react-router-dom에서 import
@@ -32,6 +38,39 @@ function Tab({ to, label, matchPath }) {
 export default function TeacherHeader() {
   const { profile, loading } = useMyProfile();
   const { theme, toggleTheme } = useTheme();
+  const { year, setYear } = useTeacherYearFilter();
+  const [years, setYears] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    supabase
+      .from("profiles")
+      .select("created_at")
+      .eq("role", "student")
+      .eq("is_hidden", false)
+      .then(({ data }) => {
+        if (cancelled) return;
+
+        const nextYears = Array.from(
+          new Set((data ?? []).map(getCreatedYear).filter(Boolean))
+        ).sort((a, b) => Number(b) - Number(a));
+
+        setYears(nextYears);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const yearOptions = useMemo(
+    () =>
+      years.includes(year) || year === ALL_TEACHER_YEARS
+        ? years
+        : [year, ...years],
+    [year, years]
+  );
 
   const logout = async () => {
     await supabase.auth.signOut();
@@ -60,7 +99,46 @@ export default function TeacherHeader() {
           {loading ? "..." : profile?.name ?? "선생님"}
         </div>
 
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <div
+          style={{
+            display: "flex",
+            gap: 8,
+            flexWrap: "wrap",
+            alignItems: "center",
+          }}
+        >
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              fontSize: 13,
+              fontWeight: 900,
+              color: "var(--text-2)",
+            }}
+          >
+            기수
+            <select
+              className="c-ctl c-input"
+              value={year}
+              onChange={(e) => setYear(e.target.value)}
+              style={{
+                width: "auto",
+                minWidth: 112,
+                minHeight: 40,
+                padding: "8px 10px",
+                fontWeight: 900,
+              }}
+            >
+              <option value={ALL_TEACHER_YEARS}>전체</option>
+              {yearOptions.map((optionYear) => (
+                <option key={optionYear} value={optionYear}>
+                  {optionYear}
+                </option>
+              ))}
+            </select>
+          </label>
+
           <button
             type="button"
             className="c-ctl c-btn"

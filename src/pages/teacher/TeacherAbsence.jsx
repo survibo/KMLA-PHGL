@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import { isAbortError } from "../../lib/isAbortError";
+import {
+  matchesTeacherYear,
+  useTeacherYearFilter,
+} from "../../lib/useTeacherYearFilter";
 
 const SORTS = {
   DATE: "date",
@@ -50,7 +54,7 @@ async function attachProfilesToAbsences(absences, signal) {
   if (ids.length > 0) {
     let query = supabase
       .from("profiles")
-      .select("id, name, grade, class_no, student_no")
+      .select("id, name, grade, class_no, student_no, created_at")
       .in("id", ids);
 
     if (signal) query = query.abortSignal(signal);
@@ -69,6 +73,7 @@ async function attachProfilesToAbsences(absences, signal) {
 }
 
 export default function TeacherAbsences() {
+  const { year } = useTeacherYearFilter();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -129,12 +134,12 @@ export default function TeacherAbsences() {
   }, [load]);
 
   async function exportToExcel() {
-    if (rows.length === 0) {
+    if (yearFiltered.length === 0) {
       window.alert("내보낼 데이터가 없습니다.");
       return;
     }
 
-    const sorted = [...rows].sort((a, b) => {
+    const sorted = [...yearFiltered].sort((a, b) => {
       const da = a.date ?? "";
       const db = b.date ?? "";
       if (da !== db) return da.localeCompare(db);
@@ -232,6 +237,10 @@ export default function TeacherAbsences() {
 
     return list;
   }, [rows, search]);
+
+  const yearFiltered = useMemo(() => {
+    return filtered.filter((row) => matchesTeacherYear(row.student, year));
+  }, [filtered, year]);
 
   if (loading) {
     return (
@@ -410,7 +419,7 @@ export default function TeacherAbsences() {
           </thead>
 
           <tbody>
-            {filtered.map((r) => {
+            {yearFiltered.map((r) => {
               const busy = updatingId === r.id;
 
               const actorName = r.actor?.name ?? "-";
@@ -592,7 +601,7 @@ export default function TeacherAbsences() {
               );
             })}
 
-            {filtered.length === 0 ? (
+            {yearFiltered.length === 0 ? (
               <tr>
                 <td
                   colSpan={8}
