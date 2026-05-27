@@ -2,6 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "../../lib/supabase";
 import { isAbortError } from "../../lib/isAbortError";
+import {
+  matchesTeacherYear,
+  useTeacherYearFilter,
+} from "../../lib/useTeacherYearFilter";
 
 const SORTS = {
   STUDENT_NO: "student_no",
@@ -10,6 +14,7 @@ const SORTS = {
 };
 
 export default function TeacherStudents() {
+  const { year } = useTeacherYearFilter();
   const [loading, setLoading] = useState(true);
   const [students, setStudents] = useState([]);
   const [error, setError] = useState("");
@@ -36,7 +41,7 @@ export default function TeacherStudents() {
       let query = supabase
         .from("profiles")
         .select(
-          "id, name, grade, class_no, student_no, approved, role, is_hidden"
+          "id, name, grade, class_no, student_no, approved, role, is_hidden, created_at"
         )
         .eq("role", "student")
         .eq("is_hidden", false)
@@ -78,9 +83,12 @@ export default function TeacherStudents() {
   // 서버에서 role/search/sort를 처리하고, 클라이언트에서는 안전망만 둔다.
   const filtered = useMemo(() => {
     return students.filter(
-      (s) => (s.role ?? "student") === "student" && !s.is_hidden
+      (s) =>
+        (s.role ?? "student") === "student" &&
+        !s.is_hidden &&
+        matchesTeacherYear(s, year)
     );
-  }, [students]);
+  }, [students, year]);
 
   // ✅ 현재 필터 결과 중 "미승인"만
   const pendingInFiltered = useMemo(() => {
@@ -141,7 +149,9 @@ export default function TeacherStudents() {
         .from("profiles")
         .update({ approved: nextApproved })
         .eq("id", student.id)
-        .select("id, name, grade, class_no, student_no, approved, role")
+        .select(
+          "id, name, grade, class_no, student_no, approved, role, is_hidden, created_at"
+        )
         .single();
 
       if (error) throw error;
@@ -174,7 +184,9 @@ export default function TeacherStudents() {
         .in("id", ids)
         .eq("approved", false)
         .eq("is_hidden", false)
-        .select("id, name, grade, class_no, student_no, approved, role");
+        .select(
+          "id, name, grade, class_no, student_no, approved, role, is_hidden, created_at"
+        );
 
       if (error) throw error;
 
@@ -219,7 +231,9 @@ export default function TeacherStudents() {
         .from("profiles")
         .update({ role: "teacher", approved: true })
         .eq("id", s.id)
-        .select("id, name, grade, class_no, student_no, approved, role")
+        .select(
+          "id, name, grade, class_no, student_no, approved, role, is_hidden, created_at"
+        )
         .single();
 
       if (error) throw error;

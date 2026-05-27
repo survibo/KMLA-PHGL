@@ -1,0 +1,23 @@
+name: Supabase Keep Alive
+
+on:
+  schedule:
+    - cron: '0 9 */5 * *'
+  workflow_dispatch:
+
+jobs:
+  keep-alive:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Supabase Keep-Alive 헬스체크
+        run: |
+          STATUS=$(curl -o /dev/null -s -w "%{http_code}" \
+            "${{ secrets.VITE_SUPABASE_URL }}/rest/v1/events?select=id&limit=1" \
+            -H "apikey: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}")
+          echo "Supabase 응답 상태 코드: $STATUS"
+          if [ "$STATUS" -ge 200 ] && [ "$STATUS" -lt 400 ]; then
+            echo "✅ Keep-alive 성공"
+          else
+            echo "⚠️ 응답 코드 확인 필요: $STATUS"
+          fi

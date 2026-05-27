@@ -15,6 +15,10 @@ import {
   startOfWeekMonday,
   toISODate,
 } from "../../features/week";
+import {
+  matchesTeacherYear,
+  useTeacherYearFilter,
+} from "../../lib/useTeacherYearFilter";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -195,7 +199,7 @@ const SORT_FN = {
 async function fetchStudents() {
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, name, grade, class_no, student_no, approved, role")
+    .select("id, name, grade, class_no, student_no, approved, role, created_at")
     .eq("role", "student")
     .eq("approved", true)
     .eq("is_hidden", false);
@@ -1301,15 +1305,20 @@ export default function TeacherCalendar() {
   const { studentId } = useParams();
   const { status, data: students, error } = useStudents();
   const [order, setOrder] = useState(ORDER.CLASS);
+  const { year } = useTeacherYearFilter();
+  const filteredStudents = useMemo(
+    () => students.filter((student) => matchesTeacherYear(student, year)),
+    [students, year]
+  );
 
   if (status === STATUS.LOADING) return <LoadingScreen />;
   if (status === STATUS.ERROR) return <ErrorScreen message={error} />;
-  if (!students.length) return <EmptyScreen />;
+  if (!filteredStudents.length) return <EmptyScreen />;
 
   return (
     <CalendarView
       studentId={studentId}
-      students={students}
+      students={filteredStudents}
       order={order}
       setOrder={setOrder}
     />
